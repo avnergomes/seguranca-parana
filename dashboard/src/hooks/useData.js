@@ -8,16 +8,21 @@ async function fetchJson(path) {
   return res.json()
 }
 
+/**
+ * Data structures from ETL:
+ *   criminalidade.json    - array [{cod_ibge, municipio, ano, mes, vitimas}]
+ *   violencia_letal.json  - array [{tipo_crime, ano, mes, ocorrencias}]  (UF-level)
+ *   patrimonio.json       - array [{tipo_crime, ano, mes, ocorrencias}]  (UF-level)
+ *   drogas.json           - {nota, ...}  (placeholder)
+ *   serie_historica.json  - {mensal_municipal[], anual_municipal[], mensal_uf_tipo[], anual_uf_tipo[]}
+ *   atlas_violencia.json  - {nota, dados}
+ *   municipios.geojson    - GeoJSON FeatureCollection
+ *   geo_map.json          - array [{cod_ibge, municipio, microrregiao, mesorregiao}]
+ *   metadata.json         - {gerado_em, fontes}
+ */
+
 export function useData() {
-  const [criminalidade, setCriminalidade] = useState(null)
-  const [violenciaLetal, setViolenciaLetal] = useState(null)
-  const [patrimonio, setPatrimonio] = useState(null)
-  const [drogas, setDrogas] = useState(null)
-  const [serieHistorica, setSerieHistorica] = useState(null)
-  const [atlasViolencia, setAtlasViolencia] = useState(null)
-  const [geoData, setGeoData] = useState(null)
-  const [geoMap, setGeoMap] = useState(null)
-  const [metadata, setMetadata] = useState(null)
+  const [raw, setRaw] = useState(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
 
@@ -31,7 +36,6 @@ export function useData() {
 
   useEffect(() => {
     let cancelled = false
-
     async function load() {
       try {
         const [crim, vl, pat, drug, serie, atlas, geo, gmap, meta] = await Promise.all([
@@ -45,19 +49,11 @@ export function useData() {
           fetchJson('geo_map.json'),
           fetchJson('metadata.json'),
         ])
-
         if (cancelled) return
-        setCriminalidade(crim)
-        setViolenciaLetal(vl)
-        setPatrimonio(pat)
-        setDrogas(drug)
-        setSerieHistorica(serie)
-        setAtlasViolencia(atlas)
-        setGeoData(geo)
-        setGeoMap(gmap)
-        setMetadata(meta)
+        setRaw({ crim, vl, pat, drug, serie, atlas, geo, gmap, meta })
 
-        const anos = crim?.anos || []
+        // Set initial year range from data
+        const anos = [...new Set(crim.map(r => r.ano))].sort((a, b) => a - b)
         if (anos.length > 0) {
           setFiltrosState(f => ({ ...f, anoInicio: anos[0], anoFim: anos[anos.length - 1] }))
         }
@@ -67,79 +63,121 @@ export function useData() {
         if (!cancelled) setLoading(false)
       }
     }
-
     load()
     return () => { cancelled = true }
   }, [])
 
-  const anos = useMemo(() => criminalidade?.anos || [], [criminalidade])
+  // Derived: list of years
+  const anos = useMemo(() => {
+    if (!raw) return []
+    return [...new Set(raw.crim.map(r => r.ano))].sort((a, b) => a - b)
+  }, [raw])
 
+  // Derived: geo lookup (cod_ibge -> {municipio, mesorregiao})
+  const geoLookup = useMemo(() => {
+    if (!raw?.gmap) return {}
+    const map = {}
+    for (const r of raw.gmap) {
+      map[r.cod_ibge] = r
+    }
+    return map
+  }, [raw])
+
+  // Derived: list of mesorregioes
   const mesorregioes = useMemo(() => {
-    if (!geoMap) return []
-    const set = new Set(Object.values(geoMap).map(m => m.mesorregiao))
-    return [...set].sort()
-  }, [geoMap])
+    if (!raw?.gmap) return []
+    return [...new Set(raw.gmap.map(r => r.mesorregiao))].sort()
+  }, [raw])
 
+  // Derived: list of municipios (filtered by mesorregiao)
   const municipios = useMemo(() => {
-    if (!geoMap) return []
-    let list = Object.entries(geoMap).map(([cod, info]) => ({
-      cod, nome: info.municipio, mesorregiao: info.mesorregiao,
-    }))
+    if (!raw?.gmap) return []
+    let list = raw.gmap.map(r => ({ cod: r.cod_ibge, nome: r.municipio, mesorregiao: r.mesorregiao }))
     if (filtros.mesorregiao !== 'todas') {
       list = list.filter(m => m.mesorregiao === filtros.mesorregiao)
     }
     return list.sort((a, b) => a.nome.localeCompare(b.nome))
-  }, [geoMap, filtros.mesorregiao])
+  }, [raw, filtros.mesorregiao])
 
+  // Filtered data
   const dadosFiltrados = useMemo(() => {
-    if (!criminalidade) return null
+    if (!raw) return null
 
-    const filtrarMunicipios = (dataset) => {
-      if (!dataset?.municipios) return dataset
-      let munsFiltered = { ...dataset.municipios }
-
-      if (filtros.mesorregiao !== 'todas' && geoMap) {
-        const codsMeso = new Set(
-          Object.entries(geoMap)
-            .filter(([, info]) => info.mesorregiao === filtros.mesorregiao)
-            .map(([cod]) => cod)
-        )
-        munsFiltered = Object.fromEntries(
-          Object.entries(munsFiltered).filter(([cod]) => codsMeso.has(cod))
-        )
-      }
-
-      if (filtros.municipio !== 'todos') {
-        munsFiltered = Object.fromEntries(
-          Object.entries(munsFiltered).filter(([cod]) => cod === filtros.municipio)
-        )
-      }
-
-      if (filtros.anoInicio && filtros.anoFim) {
-        const newMuns = {}
-        for (const [cod, mun] of Object.entries(munsFiltered)) {
-          const dadosFilt = {}
-          for (const [anoStr, dados] of Object.entries(mun.dados || {})) {
-            const ano = parseInt(anoStr)
-            if (ano >= filtros.anoInicio && ano <= filtros.anoFim) {
-              dadosFilt[anoStr] = dados
-            }
-          }
-          newMuns[cod] = { ...mun, dados: dadosFilt }
-        }
-        munsFiltered = newMuns
-      }
-
-      return { ...dataset, municipios: munsFiltered }
+    // Filter criminalidade (municipal array)
+    let crim = raw.crim
+    if (filtros.anoInicio) crim = crim.filter(r => r.ano >= filtros.anoInicio)
+    if (filtros.anoFim) crim = crim.filter(r => r.ano <= filtros.anoFim)
+    if (filtros.mesorregiao !== 'todas') {
+      const codsMeso = new Set(
+        raw.gmap.filter(g => g.mesorregiao === filtros.mesorregiao).map(g => g.cod_ibge)
+      )
+      crim = crim.filter(r => codsMeso.has(r.cod_ibge))
     }
+    if (filtros.municipio !== 'todos') {
+      crim = crim.filter(r => String(r.cod_ibge) === String(filtros.municipio))
+    }
+
+    // Filter UF-level data by year
+    let vl = raw.vl
+    let pat = raw.pat
+    if (filtros.anoInicio) {
+      vl = vl.filter(r => r.ano >= filtros.anoInicio)
+      pat = pat.filter(r => r.ano >= filtros.anoInicio)
+    }
+    if (filtros.anoFim) {
+      vl = vl.filter(r => r.ano <= filtros.anoFim)
+      pat = pat.filter(r => r.ano <= filtros.anoFim)
+    }
+
+    // Aggregate criminalidade by municipality x year
+    const munAno = {}
+    for (const r of crim) {
+      const key = `${r.cod_ibge}_${r.ano}`
+      if (!munAno[key]) munAno[key] = { cod_ibge: r.cod_ibge, municipio: r.municipio, ano: r.ano, vitimas: 0 }
+      munAno[key].vitimas += r.vitimas
+    }
+    const crimAnual = Object.values(munAno)
+
+    // Aggregate estado by year
+    const estadoAno = {}
+    for (const r of crim) {
+      if (!estadoAno[r.ano]) estadoAno[r.ano] = { ano: r.ano, vitimas: 0 }
+      estadoAno[r.ano].vitimas += r.vitimas
+    }
+    const estadoAnual = Object.values(estadoAno).sort((a, b) => a.ano - b.ano)
+
+    // Aggregate UF by year
+    const vlAnual = {}
+    for (const r of vl) {
+      if (!vlAnual[r.ano]) vlAnual[r.ano] = { ano: r.ano }
+      vlAnual[r.ano][r.tipo_crime] = (vlAnual[r.ano][r.tipo_crime] || 0) + r.ocorrencias
+    }
+    const vlEstado = Object.values(vlAnual).sort((a, b) => a.ano - b.ano)
+
+    const patAnual = {}
+    for (const r of pat) {
+      if (!patAnual[r.ano]) patAnual[r.ano] = { ano: r.ano }
+      patAnual[r.ano][r.tipo_crime] = (patAnual[r.ano][r.tipo_crime] || 0) + r.ocorrencias
+    }
+    const patEstado = Object.values(patAnual).sort((a, b) => a.ano - b.ano)
 
     return {
-      criminalidade: filtrarMunicipios(criminalidade),
-      violenciaLetal: filtrarMunicipios(violenciaLetal),
-      patrimonio: filtrarMunicipios(patrimonio),
-      drogas: filtrarMunicipios(drogas),
+      criminalidade: {
+        rows: crim,
+        anual: crimAnual,
+        estado: estadoAnual,
+      },
+      violenciaLetal: {
+        rows: vl,
+        estado: vlEstado,
+      },
+      patrimonio: {
+        rows: pat,
+        estado: patEstado,
+      },
+      drogas: raw.drug,
     }
-  }, [criminalidade, violenciaLetal, patrimonio, drogas, geoMap, filtros])
+  }, [raw, filtros])
 
   const setFiltros = useCallback((updates) => {
     setFiltrosState(f => ({ ...f, ...updates }))
@@ -148,20 +186,19 @@ export function useData() {
   return {
     loading,
     erro,
-    criminalidade,
-    violenciaLetal,
-    patrimonio,
-    drogas,
-    serieHistorica,
-    atlasViolencia,
-    geoData,
-    geoMap,
-    metadata,
+    // Raw data for specific components
+    serieHistorica: raw?.serie || null,
+    atlasViolencia: raw?.atlas || null,
+    geoData: raw?.geo || null,
+    geoLookup,
+    metadata: raw?.meta || null,
+    // Filters
     filtros,
     setFiltros,
     anos,
     mesorregioes,
     municipios,
+    // Filtered + aggregated
     dadosFiltrados,
   }
 }

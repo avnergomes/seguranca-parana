@@ -21,12 +21,10 @@ function App() {
   const {
     loading,
     erro,
-    violenciaLetal: vlRaw,
-    patrimonio: patRaw,
     serieHistorica,
     atlasViolencia,
     geoData,
-    geoMap,
+    geoLookup,
     metadata,
     filtros,
     setFiltros,
@@ -37,7 +35,6 @@ function App() {
   } = useData()
 
   const [activeTab, setActiveTab] = useState('visao-geral')
-  const [municipioSelecionado, setMunicipioSelecionado] = useState('')
 
   if (loading) return <Loading />
 
@@ -63,9 +60,7 @@ function App() {
   const crim = dadosFiltrados?.criminalidade || {}
   const vl = dadosFiltrados?.violenciaLetal || {}
   const pat = dadosFiltrados?.patrimonio || {}
-  const drogas = dadosFiltrados?.drogas || {}
-  const atlas = atlasViolencia || {}
-  const geojson = geoData || null
+  const anoAtual = filtros.anoFim || anos[anos.length - 1]
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -88,25 +83,28 @@ function App() {
           <div className="space-y-6">
             <ErrorBoundary>
               <KpiCards
-                dados={crim}
-                violenciaLetal={vl}
-                patrimonio={pat}
+                estadoCrim={crim.estado}
+                estadoVl={vl.estado}
+                estadoPat={pat.estado}
+                anoAtual={anoAtual}
               />
             </ErrorBoundary>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ErrorBoundary>
                 <MapChart
-                  geojson={geojson}
-                  dados={crim}
-                  indicador="vitimas"
+                  geojson={geoData}
+                  dados={crim.anual}
+                  geoLookup={geoLookup}
+                  anoAtual={anoAtual}
+                  titulo="Vitimas por Municipio"
                 />
               </ErrorBoundary>
 
               <ErrorBoundary>
                 <TimeSeriesChart
-                  dados={crim.municipios}
-                  titulo="Evolucao Temporal"
+                  dados={crim.estado}
+                  titulo="Evolucao Temporal — Vitimas"
                 />
               </ErrorBoundary>
             </div>
@@ -114,63 +112,41 @@ function App() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <ErrorBoundary>
                 <TreemapChart
-                  dados={crim.municipios}
-                  titulo="Composicao por Tipo de Crime"
+                  dados={vl.estado}
+                  anoAtual={anoAtual}
+                  titulo="Composicao — Violencia Letal"
                 />
               </ErrorBoundary>
 
               <ErrorBoundary>
-                <SankeyChart
-                  dados={crim.municipios}
-                  titulo="Fluxo: Tipo de Crime por Mesorregiao"
+                <BarChart
+                  dados={crim.anual}
+                  geoLookup={geoLookup}
+                  anoAtual={anoAtual}
+                  titulo="Top 10 Municipios — Vitimas"
+                  topN={10}
                 />
               </ErrorBoundary>
             </div>
-
-            <ErrorBoundary>
-              <BarChart
-                dados={crim.municipios}
-                titulo="Top 10 Municipios"
-                topN={10}
-                horizontal
-              />
-            </ErrorBoundary>
           </div>
         )}
 
         {/* Violencia Letal */}
         {activeTab === 'violencia-letal' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <ErrorBoundary>
-                <MapChart
-                  geojson={geojson}
-                  dados={vl}
-                  indicador="homicidios"
-                />
-              </ErrorBoundary>
-
-              <ErrorBoundary>
-                <TimeSeriesChart
-                  dados={vl.municipios}
-                  titulo="Serie Temporal - Violencia Letal"
-                />
-              </ErrorBoundary>
-            </div>
-
             <ErrorBoundary>
-              <BarChart
-                dados={vl.municipios}
-                titulo="Homicidios por Municipio"
-                topN={15}
-                horizontal
+              <TimeSeriesChart
+                dados={vl.estado}
+                titulo="Serie Temporal — Violencia Letal por Tipo"
               />
             </ErrorBoundary>
 
             <ErrorBoundary>
               <RankingTable
-                dados={vl.municipios}
-                titulo="Ranking - Violencia Letal"
+                dados={crim.anual}
+                geoLookup={geoLookup}
+                anoAtual={anoAtual}
+                titulo="Ranking — Vitimas por Municipio"
               />
             </ErrorBoundary>
           </div>
@@ -179,34 +155,17 @@ function App() {
         {/* Crimes Patrimoniais */}
         {activeTab === 'crimes-patrimoniais' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <ErrorBoundary>
-                <MapChart
-                  geojson={geojson}
-                  dados={pat}
-                  indicador="patrimonio"
-                />
-              </ErrorBoundary>
-
-              <ErrorBoundary>
-                <TimeSeriesChart
-                  dados={pat.municipios}
-                  titulo="Serie Temporal - Crimes Patrimoniais"
-                />
-              </ErrorBoundary>
-            </div>
-
             <ErrorBoundary>
-              <HeatmapChart
-                dados={pat.municipios}
-                titulo="Mapa de Calor: Mes x Tipo de Crime"
+              <TimeSeriesChart
+                dados={pat.estado}
+                titulo="Serie Temporal — Crimes Patrimoniais"
               />
             </ErrorBoundary>
 
             <ErrorBoundary>
-              <RankingTable
-                dados={pat.municipios}
-                titulo="Ranking - Crimes Patrimoniais"
+              <HeatmapChart
+                dados={serieHistorica?.mensal_uf_tipo}
+                titulo="Sazonalidade — Mes x Tipo de Crime"
               />
             </ErrorBoundary>
           </div>
@@ -214,37 +173,11 @@ function App() {
 
         {/* Drogas e Armas */}
         {activeTab === 'drogas-armas' && (
-          <div className="space-y-6">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <ErrorBoundary>
-                <TreemapChart
-                  dados={drogas.municipios}
-                  titulo="Composicao - Drogas e Armas"
-                />
-              </ErrorBoundary>
-
-              <ErrorBoundary>
-                <TimeSeriesChart
-                  dados={drogas.municipios}
-                  titulo="Serie Temporal - Drogas e Armas"
-                />
-              </ErrorBoundary>
-            </div>
-
-            <ErrorBoundary>
-              <MapChart
-                geojson={geojson}
-                dados={drogas}
-                indicador="drogas"
-              />
-            </ErrorBoundary>
-
-            <ErrorBoundary>
-              <RankingTable
-                dados={drogas.municipios}
-                titulo="Ranking - Drogas e Armas"
-              />
-            </ErrorBoundary>
+          <div className="card text-center py-12">
+            <p className="text-dark-500">
+              Dados de drogas e armas nao estao disponiveis no SINESP municipal.
+              Consultar os relatorios trimestrais da SESP-PR/CAPE para informacoes detalhadas.
+            </p>
           </div>
         )}
 
@@ -253,41 +186,17 @@ function App() {
           <div className="space-y-6">
             <ErrorBoundary>
               <TimeSeriesChart
-                dados={atlas.series || atlas.municipios || []}
-                titulo="Atlas Temporal da Criminalidade"
+                dados={serieHistorica?.anual_uf_tipo}
+                titulo="Evolucao Anual por Tipo de Crime (2015-2022)"
               />
             </ErrorBoundary>
 
             <ErrorBoundary>
-              <BumpChart
-                dados={crim.municipios}
-                titulo="Ranking de Municipios ao Longo do Tempo"
-                topN={10}
+              <TimeSeriesChart
+                dados={serieHistorica?.anual_municipal}
+                titulo="Vitimas Totais por Ano"
               />
             </ErrorBoundary>
-
-            <div className="card">
-              <h3 className="section-title">Marcos Historicos</h3>
-              <div className="space-y-3">
-                {(atlas.marcos || []).length > 0 ? (
-                  atlas.marcos.map((marco, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 p-3 bg-neutral-50 rounded-lg"
-                    >
-                      <span className="text-sm font-display font-bold text-alert-600 whitespace-nowrap">
-                        {marco.ano || marco.data || '-'}
-                      </span>
-                      <p className="text-sm text-dark-600">{marco.descricao || marco.evento || '-'}</p>
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm text-dark-400">
-                    Marcos historicos serao exibidos quando disponiveis nos dados.
-                  </p>
-                )}
-              </div>
-            </div>
           </div>
         )}
 
@@ -295,39 +204,28 @@ function App() {
         {activeTab === 'perfil-municipal' && (
           <div className="space-y-6">
             <div className="card">
-              <h3 className="section-title">Selecione um Municipio</h3>
+              <h3 className="section-title mb-3">Selecione um Municipio</h3>
               <select
-                value={municipioSelecionado}
-                onChange={(e) => setMunicipioSelecionado(e.target.value)}
+                value={filtros.municipio}
+                onChange={(e) => setFiltros({ municipio: e.target.value })}
                 className="w-full max-w-md text-sm border border-neutral-200 rounded-lg px-3 py-2.5 bg-white focus:ring-2 focus:ring-alert-300 focus:border-alert-400 outline-none"
               >
-                <option value="">Escolha um municipio...</option>
+                <option value="todos">Escolha um municipio...</option>
                 {municipios.map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                  <option key={m.cod} value={m.cod}>{m.nome}</option>
                 ))}
               </select>
             </div>
 
-            {municipioSelecionado && (
-              <>
-                <ErrorBoundary>
-                  <RadarChart
-                    dados={crim.municipios}
-                    dadosEstado={crim.municipios}
-                    municipioSelecionado={municipioSelecionado}
-                    titulo={`Perfil Criminal - ${municipioSelecionado}`}
-                  />
-                </ErrorBoundary>
-
-                <ErrorBoundary>
-                  <RankingTable
-                    dados={(crim.municipios || []).filter(
-                      (d) => d.municipio === municipioSelecionado
-                    )}
-                    titulo={`Detalhamento - ${municipioSelecionado}`}
-                  />
-                </ErrorBoundary>
-              </>
+            {filtros.municipio !== 'todos' && (
+              <ErrorBoundary>
+                <RankingTable
+                  dados={crim.anual}
+                  geoLookup={geoLookup}
+                  anoAtual={anoAtual}
+                  titulo={`Detalhamento — ${geoLookup[filtros.municipio]?.municipio || filtros.municipio}`}
+                />
+              </ErrorBoundary>
             )}
           </div>
         )}
