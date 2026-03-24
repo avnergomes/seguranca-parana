@@ -72,7 +72,7 @@ function KpiCard({ titulo, valor, anterior, icon: Icon, colorBg, colorIcon, colo
 function App() {
   const {
     loading, erro, serieHistorica, geoData, geoLookup, metadata,
-    filtros, setFiltros, anos, mesorregioes, municipios, dadosFiltrados,
+    filtros, setFiltros, anos, mesorregioes, regionais, municipios, dadosFiltrados,
   } = useData()
 
   const [activeTab, setActiveTab] = useState('visao-geral')
@@ -188,7 +188,7 @@ function App() {
             </div>
             <h2 className="text-lg font-display font-bold text-dark-900">Filtros</h2>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
             <div>
               <label className="filter-label">Ano inicial</label>
               <select value={filtros.anoInicio || ''} onChange={e => setFiltros({ anoInicio: Number(e.target.value) })} className="filter-select">
@@ -202,10 +202,17 @@ function App() {
               </select>
             </div>
             <div>
-              <label className="filter-label">Mesorregiao</label>
-              <select value={filtros.mesorregiao} onChange={e => setFiltros({ mesorregiao: e.target.value, municipio: 'todos' })} className="filter-select">
+              <label className="filter-label">Mesorregiao IDR</label>
+              <select value={filtros.mesorregiao} onChange={e => setFiltros({ mesorregiao: e.target.value })} className="filter-select">
                 <option value="todas">Todas as mesorregioes</option>
                 {mesorregioes.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="filter-label">Regional IDR</label>
+              <select value={filtros.regional} onChange={e => setFiltros({ regional: e.target.value })} className="filter-select">
+                <option value="todas">Todas as regionais</option>
+                {regionais.map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div>
@@ -216,12 +223,18 @@ function App() {
               </select>
             </div>
           </div>
-          {(filtros.mesorregiao !== 'todas' || filtros.municipio !== 'todos') && (
+          {(filtros.mesorregiao !== 'todas' || filtros.regional !== 'todas' || filtros.municipio !== 'todos') && (
             <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-neutral-100">
               {filtros.mesorregiao !== 'todas' && (
                 <span className="active-filter-badge">
-                  {filtros.mesorregiao}
-                  <button onClick={() => setFiltros({ mesorregiao: 'todas', municipio: 'todos' })}><X className="w-3 h-3" /></button>
+                  Meso: {filtros.mesorregiao}
+                  <button onClick={() => setFiltros({ mesorregiao: 'todas' })}><X className="w-3 h-3" /></button>
+                </span>
+              )}
+              {filtros.regional !== 'todas' && (
+                <span className="active-filter-badge">
+                  Regional: {filtros.regional}
+                  <button onClick={() => setFiltros({ regional: 'todas' })}><X className="w-3 h-3" /></button>
                 </span>
               )}
               {filtros.municipio !== 'todos' && (
@@ -436,7 +449,7 @@ function App() {
             {filtros.municipio !== 'todos' && (
               <div className="chart-container">
                 <h3 className="chart-title">{geoLookup[filtros.municipio]?.municipio}</h3>
-                <p className="text-xs text-dark-400 mb-4">{geoLookup[filtros.municipio]?.mesorregiao}</p>
+                <p className="text-xs text-dark-400 mb-4">{geoLookup[filtros.municipio]?.regional} — {geoLookup[filtros.municipio]?.mesorregiao}</p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead>
