@@ -4,7 +4,53 @@
 
 @layer components {
   .card {
-    @apply bg-white rounded-xl shadow-card p-6 border border-neutral-200/60;
+    @apply bg-white/90 backdrop-blur-md rounded-2xl shadow-soft border border-primary-100/50;
+  }
+
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-lg hover:-translate-y-1;
+  }
+
+  .stat-card {
+    @apply card p-5 md:p-6 relative overflow-hidden;
+  }
+
+  .filter-select {
+    @apply w-full px-4 py-2.5 bg-white border border-neutral-200 rounded-xl text-sm
+           focus:ring-2 focus:ring-alert-500/20 focus:border-alert-500
+           transition-all duration-200 appearance-none cursor-pointer
+           hover:border-alert-400;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 20 20'%3E%3Cpath stroke='%236b7280' stroke-linecap='round' stroke-linejoin='round' stroke-width='1.5' d='M6 8l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1.25rem;
+    padding-right: 2.5rem;
+  }
+
+  .filter-label {
+    @apply block text-sm font-medium text-neutral-700 mb-1.5;
+  }
+
+  .chart-container {
+    @apply card p-4 md:p-6;
+  }
+
+  .chart-title {
+    @apply text-base font-display font-semibold text-dark-800 mb-1;
+  }
+
+  .kpi-value {
+    @apply text-2xl md:text-3xl font-display font-bold bg-gradient-to-r from-alert-600 to-danger-600 bg-clip-text text-transparent;
+  }
+
+  .kpi-label {
+    @apply text-xs md:text-sm font-medium text-neutral-500 uppercase tracking-wide;
+  }
+
+  .active-filter-badge {
+    @apply inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium
+           bg-alert-50 text-alert-700 border border-alert-200/50
+           transition-all duration-150 hover:bg-alert-100;
   }
 
   .section-title {
@@ -12,35 +58,26 @@
   }
 }
 
+/* Scrollbar */
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: theme('colors.primary.300') transparent;
+}
+.scrollbar-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background-color: theme('colors.primary.300'); border-radius: 999px; }
+
 /* Leaflet overrides */
 .leaflet-container {
   font-family: 'Inter', system-ui, sans-serif;
   border-radius: 0.75rem;
   z-index: 1;
 }
-
 .leaflet-popup-content-wrapper {
-  border-radius: 0.5rem;
-  box-shadow: 0 2px 15px -3px rgba(0, 0, 0, 0.07), 0 10px 20px -2px rgba(0, 0, 0, 0.04);
+  border-radius: 0.75rem;
+  box-shadow: 0 2px 15px -3px rgba(0,0,0,0.07);
   font-family: 'Inter', system-ui, sans-serif;
 }
-
-.leaflet-popup-content {
-  margin: 0.75rem 1rem;
-  font-size: 0.875rem;
-  line-height: 1.5;
-}
-
-.leaflet-popup-tip {
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.leaflet-control-zoom a {
-  border-radius: 0.375rem !important;
-  color: #393D3F !important;
-}
-
-.leaflet-control-attribution {
-  font-size: 0.625rem !important;
-  opacity: 0.7;
-}
+.leaflet-popup-content { margin: 0.75rem 1rem; font-size: 0.875rem; line-height: 1.5; }
+.leaflet-control-zoom a { border-radius: 0.375rem !important; color: #393D3F !important; }
+.leaflet-control-attribution { font-size: 0.625rem !important; opacity: 0.7; }
