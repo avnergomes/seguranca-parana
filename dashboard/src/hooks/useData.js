@@ -8,18 +8,6 @@ async function fetchJson(path) {
   return res.json()
 }
 
-/**
- * Data sources:
- *   criminalidade.json    - [{cod_ibge, municipio, ano, mes, vitimas}]
- *   violencia_letal.json  - [{tipo_crime, ano, mes, ocorrencias}]  (UF-level)
- *   patrimonio.json       - [{tipo_crime, ano, mes, ocorrencias}]  (UF-level)
- *   drogas.json           - {nota, ...}
- *   serie_historica.json  - {mensal_municipal[], anual_municipal[], mensal_uf_tipo[], anual_uf_tipo[]}
- *   atlas_violencia.json  - {nota, dados}
- *   municipios.geojson    - GeoJSON with properties: CodIbge, Municipio, MesoIdr, RegIdr, CRegIdr
- *   metadata.json         - {gerado_em, fontes}
- */
-
 export function useData() {
   const [raw, setRaw] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -31,17 +19,17 @@ export function useData() {
     mesorregiao: 'todas',
     regional: 'todas',
     municipio: 'todos',
-    tipoCrime: 'todos',
   })
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const [crim, vl, pat, drug, serie, atlas, geo, meta] = await Promise.all([
+        const [crim, vl, pat, vitSexo, drug, serie, atlas, geo, meta] = await Promise.all([
           fetchJson('criminalidade.json'),
           fetchJson('violencia_letal.json'),
           fetchJson('patrimonio.json'),
+          fetchJson('vitimas_sexo.json'),
           fetchJson('drogas.json'),
           fetchJson('serie_historica.json'),
           fetchJson('atlas_violencia.json'),
@@ -49,8 +37,7 @@ export function useData() {
           fetchJson('metadata.json'),
         ])
         if (cancelled) return
-        setRaw({ crim, vl, pat, drug, serie, atlas, geo, meta })
-
+        setRaw({ crim, vl, pat, vitSexo, drug, serie, atlas, geo, meta })
         const anos = [...new Set(crim.map(r => r.ano))].sort((a, b) => a - b)
         if (anos.length > 0) {
           setFiltrosState(f => ({ ...f, anoInicio: anos[0], anoFim: anos[anos.length - 1] }))
@@ -65,21 +52,15 @@ export function useData() {
     return () => { cancelled = true }
   }, [])
 
-  // Build geo lookup from GeoJSON features
+  // GeoJSON-derived lookup
   const geoLookup = useMemo(() => {
     if (!raw?.geo?.features) return {}
-    const map = {}
+    const m = {}
     for (const f of raw.geo.features) {
       const p = f.properties
-      map[p.CodIbge] = {
-        cod_ibge: p.CodIbge,
-        municipio: p.Municipio,
-        mesorregiao: p.MesoIdr,
-        regional: p.RegIdr,
-        cod_regional: p.CRegIdr,
-      }
+      m[p.CodIbge] = { cod_ibge: p.CodIbge, municipio: p.Municipio, mesorregiao: p.MesoIdr, regional: p.RegIdr }
     }
-    return map
+    return m
   }, [raw])
 
   const anos = useMemo(() => {
@@ -89,60 +70,55 @@ export function useData() {
 
   const mesorregioes = useMemo(() => {
     if (!raw?.geo?.features) return []
-    const set = new Set(raw.geo.features.map(f => f.properties.MesoIdr))
-    return [...set].sort()
+    return [...new Set(raw.geo.features.map(f => f.properties.MesoIdr))].sort()
   }, [raw])
 
   const regionais = useMemo(() => {
     if (!raw?.geo?.features) return []
     let feats = raw.geo.features
-    if (filtros.mesorregiao !== 'todas') {
-      feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
-    }
-    const set = new Set(feats.map(f => f.properties.RegIdr))
-    return [...set].sort()
+    if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
+    return [...new Set(feats.map(f => f.properties.RegIdr))].sort()
   }, [raw, filtros.mesorregiao])
 
   const municipios = useMemo(() => {
     if (!raw?.geo?.features) return []
     let feats = raw.geo.features
-    if (filtros.mesorregiao !== 'todas') {
-      feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
-    }
-    if (filtros.regional !== 'todas') {
-      feats = feats.filter(f => f.properties.RegIdr === filtros.regional)
-    }
-    return feats
-      .map(f => ({ cod: f.properties.CodIbge, nome: f.properties.Municipio, mesorregiao: f.properties.MesoIdr, regional: f.properties.RegIdr }))
-      .sort((a, b) => a.nome.localeCompare(b.nome))
+    if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
+    if (filtros.regional !== 'todas') feats = feats.filter(f => f.properties.RegIdr === filtros.regional)
+    return feats.map(f => ({ cod: f.properties.CodIbge, nome: f.properties.Municipio })).sort((a, b) => a.nome.localeCompare(b.nome))
   }, [raw, filtros.mesorregiao, filtros.regional])
 
+  // Filtered cod set (null = no geographic filter)
+  const filteredCods = useMemo(() => {
+    if (!raw?.geo?.features) return null
+    if (filtros.mesorregiao === 'todas' && filtros.regional === 'todas' && filtros.municipio === 'todos') return null
+    let feats = raw.geo.features
+    if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
+    if (filtros.regional !== 'todas') feats = feats.filter(f => f.properties.RegIdr === filtros.regional)
+    if (filtros.municipio !== 'todos') feats = feats.filter(f => f.properties.CodIbge === filtros.municipio)
+    return new Set(feats.map(f => Number(f.properties.CodIbge)))
+  }, [raw, filtros])
+
+  // Year filter helper
+  const inYear = useCallback((ano) => {
+    if (filtros.anoInicio && ano < filtros.anoInicio) return false
+    if (filtros.anoFim && ano > filtros.anoFim) return false
+    return true
+  }, [filtros.anoInicio, filtros.anoFim])
+
+  // ALL filtered datasets
   const dadosFiltrados = useMemo(() => {
     if (!raw) return null
 
-    // Build set of filtered cod_ibge from geojson
-    let filteredCods = null
-    if (filtros.mesorregiao !== 'todas' || filtros.regional !== 'todas' || filtros.municipio !== 'todos') {
-      let feats = raw.geo.features
-      if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
-      if (filtros.regional !== 'todas') feats = feats.filter(f => f.properties.RegIdr === filtros.regional)
-      if (filtros.municipio !== 'todos') feats = feats.filter(f => f.properties.CodIbge === filtros.municipio)
-      filteredCods = new Set(feats.map(f => Number(f.properties.CodIbge)))
-    }
+    // Municipal data filtered by year + geography
+    const crim = raw.crim.filter(r => inYear(r.ano) && (!filteredCods || filteredCods.has(r.cod_ibge)))
 
-    // Filter criminalidade
-    let crim = raw.crim
-    if (filtros.anoInicio) crim = crim.filter(r => r.ano >= filtros.anoInicio)
-    if (filtros.anoFim) crim = crim.filter(r => r.ano <= filtros.anoFim)
-    if (filteredCods) crim = crim.filter(r => filteredCods.has(r.cod_ibge))
+    // UF data filtered by year only (no geographic breakdown at UF level)
+    const vl = raw.vl.filter(r => inYear(r.ano))
+    const pat = raw.pat.filter(r => inYear(r.ano))
+    const vitSexo = raw.vitSexo.filter(r => inYear(r.ano))
 
-    // Filter UF-level by year
-    let vl = raw.vl
-    let pat = raw.pat
-    if (filtros.anoInicio) { vl = vl.filter(r => r.ano >= filtros.anoInicio); pat = pat.filter(r => r.ano >= filtros.anoInicio) }
-    if (filtros.anoFim) { vl = vl.filter(r => r.ano <= filtros.anoFim); pat = pat.filter(r => r.ano <= filtros.anoFim) }
-
-    // Aggregate crim by municipality x year
+    // Aggregate municipal -> by municipality × year
     const munAno = {}
     for (const r of crim) {
       const key = `${r.cod_ibge}_${r.ano}`
@@ -150,23 +126,31 @@ export function useData() {
       munAno[key].vitimas += r.vitimas
     }
 
-    // Aggregate estado by year
+    // Aggregate municipal -> estado by year
     const estadoAno = {}
     for (const r of crim) {
       if (!estadoAno[r.ano]) estadoAno[r.ano] = { ano: r.ano, vitimas: 0 }
       estadoAno[r.ano].vitimas += r.vitimas
     }
 
-    // Aggregate UF crime types by year
-    const vlAnual = {}
+    // Aggregate UF ocorrencias by year (pivoted: one row per year with all crime types as columns)
+    const vlByYear = {}
     for (const r of vl) {
-      if (!vlAnual[r.ano]) vlAnual[r.ano] = { ano: r.ano }
-      vlAnual[r.ano][r.tipo_crime] = (vlAnual[r.ano][r.tipo_crime] || 0) + r.ocorrencias
+      if (!vlByYear[r.ano]) vlByYear[r.ano] = { ano: r.ano }
+      vlByYear[r.ano][r.tipo_crime] = (vlByYear[r.ano][r.tipo_crime] || 0) + r.ocorrencias
     }
-    const patAnual = {}
+    const patByYear = {}
     for (const r of pat) {
-      if (!patAnual[r.ano]) patAnual[r.ano] = { ano: r.ano }
-      patAnual[r.ano][r.tipo_crime] = (patAnual[r.ano][r.tipo_crime] || 0) + r.ocorrencias
+      if (!patByYear[r.ano]) patByYear[r.ano] = { ano: r.ano }
+      patByYear[r.ano][r.tipo_crime] = (patByYear[r.ano][r.tipo_crime] || 0) + r.ocorrencias
+    }
+
+    // Vitimas by sex, pivoted by year
+    const vitSexoByYear = {}
+    for (const r of vitSexo) {
+      if (!vitSexoByYear[r.ano]) vitSexoByYear[r.ano] = { ano: r.ano }
+      const key = `${r.tipo_crime} (${r.sexo})`
+      vitSexoByYear[r.ano][key] = (vitSexoByYear[r.ano][key] || 0) + r.vitimas
     }
 
     return {
@@ -177,20 +161,23 @@ export function useData() {
       },
       violenciaLetal: {
         rows: vl,
-        estado: Object.values(vlAnual).sort((a, b) => a.ano - b.ano),
+        estado: Object.values(vlByYear).sort((a, b) => a.ano - b.ano),
       },
       patrimonio: {
         rows: pat,
-        estado: Object.values(patAnual).sort((a, b) => a.ano - b.ano),
+        estado: Object.values(patByYear).sort((a, b) => a.ano - b.ano),
+      },
+      vitimasSexo: {
+        rows: vitSexo,
+        estado: Object.values(vitSexoByYear).sort((a, b) => a.ano - b.ano),
       },
       drogas: raw.drug,
     }
-  }, [raw, filtros])
+  }, [raw, inYear, filteredCods])
 
   const setFiltros = useCallback((updates) => {
     setFiltrosState(f => {
       const next = { ...f, ...updates }
-      // Reset dependents
       if (updates.mesorregiao !== undefined) { next.regional = 'todas'; next.municipio = 'todos' }
       if (updates.regional !== undefined) { next.municipio = 'todos' }
       return next

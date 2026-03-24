@@ -196,6 +196,61 @@ def load_uf() -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
+# UF-level victims by sex  (SINESP uf.xlsx, sheet 'Vítimas')
+# ---------------------------------------------------------------------------
+
+def load_uf_vitimas() -> pd.DataFrame:
+    """
+    Load SINESP UF-level victim data with sex breakdown.
+
+    Sheet: 'Vítimas'
+    Positional columns:
+      0: uf (str)
+      1: tipo_crime (str)
+      2: ano (int)
+      3: mes (str - Portuguese text)
+      4: sexo (str - Feminino/Masculino/Sexo NI)
+      5: vitimas (int)
+
+    3 crime types (homicídio doloso, lesão corporal seguida de morte,
+    latrocínio), range 2015-2022, monthly.
+    """
+    path = RAW_DIR / "sinesp" / "indicadores_uf.xlsx"
+    if not path.exists():
+        return pd.DataFrame()
+
+    print(f"  Reading {path.name} sheet='Vítimas' ...")
+    try:
+        df = pd.read_excel(path, sheet_name="Vítimas")
+    except Exception:
+        # Sheet name may have encoding issues
+        df = pd.read_excel(path, sheet_name=1)
+
+    cols = list(df.columns)
+    rename_map = {
+        cols[0]: "uf",
+        cols[1]: "tipo_crime",
+        cols[2]: "ano",
+        cols[3]: "mes",
+        cols[4]: "sexo",
+        cols[5]: "vitimas",
+    }
+    df = df.rename(columns=rename_map)
+
+    df = df[df["uf"].str.strip().str.upper() == "PARANÁ"].copy()
+
+    df["mes_num"] = df["mes"].str.strip().str.lower().map(MES_PT)
+    df["ano"] = pd.to_numeric(df["ano"], errors="coerce").astype("Int64")
+    df["vitimas"] = pd.to_numeric(df["vitimas"], errors="coerce").fillna(0).astype(int)
+    df = df.dropna(subset=["ano", "mes_num"])
+    df["mes_num"] = df["mes_num"].astype(int)
+
+    print(f"  {len(df)} rows, {df['tipo_crime'].nunique()} crime types, "
+          f"sexos: {sorted(df['sexo'].unique())}")
+    return df
+
+
+# ---------------------------------------------------------------------------
 # Output builders
 # ---------------------------------------------------------------------------
 
@@ -261,6 +316,22 @@ def build_drogas() -> dict:
         "fonte_alternativa": "SESP-PR/CAPE relatórios anuais (PDF)",
         "dados": [],
     }
+
+
+def build_vitimas_sexo(df_vit: pd.DataFrame) -> list[dict]:
+    """UF victim data by sex -> vitimas_sexo.json"""
+    if df_vit.empty:
+        return []
+    records = []
+    for _, row in df_vit.iterrows():
+        records.append({
+            "tipo_crime": str(row["tipo_crime"]),
+            "ano": int(row["ano"]),
+            "mes": int(row["mes_num"]),
+            "sexo": str(row["sexo"]),
+            "vitimas": int(row["vitimas"]),
+        })
+    return records
 
 
 def build_serie_historica(
@@ -494,12 +565,16 @@ def main() -> None:
     print("\n--- Loading UF data ---")
     df_uf = load_uf()
 
+    print("\n--- Loading UF victims by sex ---")
+    df_vit = load_uf_vitimas()
+
     # Build outputs
     print("\n--- Building output JSONs ---")
 
     _save_json(build_criminalidade(df_mun), "criminalidade.json")
     _save_json(build_violencia_letal(df_uf), "violencia_letal.json")
     _save_json(build_patrimonio(df_uf), "patrimonio.json")
+    _save_json(build_vitimas_sexo(df_vit), "vitimas_sexo.json")
     _save_json(build_drogas(), "drogas.json")
     _save_json(build_serie_historica(df_mun, df_uf), "serie_historica.json")
     _save_json(build_atlas_violencia(), "atlas_violencia.json")
