@@ -2,14 +2,6 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 
 const BASE = import.meta.env.BASE_URL + 'data/'
 
-const INITIAL_FILTROS = {
-  anoInicio: null,
-  anoFim: null,
-  mesorregiao: '',
-  municipio: '',
-  tipoCrime: '',
-}
-
 async function fetchJson(path) {
   const res = await fetch(BASE + path)
   if (!res.ok) throw new Error(`Falha ao carregar ${path}: ${res.status}`)
@@ -17,51 +9,62 @@ async function fetchJson(path) {
 }
 
 export function useData() {
-  const [dados, setDados] = useState({
-    criminalidade: null,
-    violenciaLetal: null,
-    patrimonio: null,
-    drogas: null,
-    atlas: null,
-    geojson: null,
-    metadata: null,
-  })
+  const [criminalidade, setCriminalidade] = useState(null)
+  const [violenciaLetal, setViolenciaLetal] = useState(null)
+  const [patrimonio, setPatrimonio] = useState(null)
+  const [drogas, setDrogas] = useState(null)
+  const [serieHistorica, setSerieHistorica] = useState(null)
+  const [atlasViolencia, setAtlasViolencia] = useState(null)
+  const [geoData, setGeoData] = useState(null)
+  const [geoMap, setGeoMap] = useState(null)
+  const [metadata, setMetadata] = useState(null)
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
-  const [filtros, setFiltros] = useState(INITIAL_FILTROS)
+
+  const [filtros, setFiltrosState] = useState({
+    anoInicio: null,
+    anoFim: null,
+    mesorregiao: 'todas',
+    municipio: 'todos',
+    tipoCrime: 'todos',
+  })
 
   useEffect(() => {
     let cancelled = false
 
     async function load() {
       try {
-        const [
-          criminalidade,
-          violenciaLetal,
-          patrimonio,
-          drogas,
-          atlas,
-          geojson,
-          metadata,
-        ] = await Promise.all([
+        const [crim, vl, pat, drug, serie, atlas, geo, gmap, meta] = await Promise.all([
           fetchJson('criminalidade.json'),
           fetchJson('violencia_letal.json'),
           fetchJson('patrimonio.json'),
-          fetchJson('drogas_armas.json'),
-          fetchJson('atlas_temporal.json'),
+          fetchJson('drogas.json'),
+          fetchJson('serie_historica.json'),
+          fetchJson('atlas_violencia.json'),
           fetchJson('municipios.geojson'),
+          fetchJson('geo_map.json'),
           fetchJson('metadata.json'),
         ])
 
-        if (!cancelled) {
-          setDados({ criminalidade, violenciaLetal, patrimonio, drogas, atlas, geojson, metadata })
-          setLoading(false)
+        if (cancelled) return
+        setCriminalidade(crim)
+        setViolenciaLetal(vl)
+        setPatrimonio(pat)
+        setDrogas(drug)
+        setSerieHistorica(serie)
+        setAtlasViolencia(atlas)
+        setGeoData(geo)
+        setGeoMap(gmap)
+        setMetadata(meta)
+
+        const anos = crim?.anos || []
+        if (anos.length > 0) {
+          setFiltrosState(f => ({ ...f, anoInicio: anos[0], anoFim: anos[anos.length - 1] }))
         }
       } catch (e) {
-        if (!cancelled) {
-          setErro(e.message)
-          setLoading(false)
-        }
+        if (!cancelled) setErro(e.message)
+      } finally {
+        if (!cancelled) setLoading(false)
       }
     }
 
@@ -69,89 +72,93 @@ export function useData() {
     return () => { cancelled = true }
   }, [])
 
-  const anos = useMemo(() => {
-    if (!dados.criminalidade) return []
-    const set = new Set()
-    const municipios = dados.criminalidade.municipios || []
-    municipios.forEach((m) => {
-      if (m.ano) set.add(m.ano)
-    })
-    return [...set].sort((a, b) => a - b)
-  }, [dados.criminalidade])
+  const anos = useMemo(() => criminalidade?.anos || [], [criminalidade])
 
   const mesorregioes = useMemo(() => {
-    if (!dados.criminalidade) return []
-    const set = new Set()
-    const municipios = dados.criminalidade.municipios || []
-    municipios.forEach((m) => {
-      if (m.mesorregiao) set.add(m.mesorregiao)
-    })
+    if (!geoMap) return []
+    const set = new Set(Object.values(geoMap).map(m => m.mesorregiao))
     return [...set].sort()
-  }, [dados.criminalidade])
+  }, [geoMap])
 
   const municipios = useMemo(() => {
-    if (!dados.criminalidade) return []
-    const municipiosData = dados.criminalidade.municipios || []
-    let filtered = municipiosData
-    if (filtros.mesorregiao) {
-      filtered = filtered.filter((m) => m.mesorregiao === filtros.mesorregiao)
+    if (!geoMap) return []
+    let list = Object.entries(geoMap).map(([cod, info]) => ({
+      cod, nome: info.municipio, mesorregiao: info.mesorregiao,
+    }))
+    if (filtros.mesorregiao !== 'todas') {
+      list = list.filter(m => m.mesorregiao === filtros.mesorregiao)
     }
-    const set = new Set()
-    filtered.forEach((m) => {
-      if (m.municipio) set.add(m.municipio)
-    })
-    return [...set].sort()
-  }, [dados.criminalidade, filtros.mesorregiao])
+    return list.sort((a, b) => a.nome.localeCompare(b.nome))
+  }, [geoMap, filtros.mesorregiao])
 
   const dadosFiltrados = useMemo(() => {
-    if (!dados.criminalidade) return null
+    if (!criminalidade) return null
 
-    const filterArray = (arr) => {
-      if (!arr) return []
-      return arr.filter((item) => {
-        if (filtros.anoInicio && item.ano && item.ano < filtros.anoInicio) return false
-        if (filtros.anoFim && item.ano && item.ano > filtros.anoFim) return false
-        if (filtros.mesorregiao && item.mesorregiao && item.mesorregiao !== filtros.mesorregiao) return false
-        if (filtros.municipio && item.municipio && item.municipio !== filtros.municipio) return false
-        if (filtros.tipoCrime && item.tipo_crime && item.tipo_crime !== filtros.tipoCrime) return false
-        return true
-      })
+    const filtrarMunicipios = (dataset) => {
+      if (!dataset?.municipios) return dataset
+      let munsFiltered = { ...dataset.municipios }
+
+      if (filtros.mesorregiao !== 'todas' && geoMap) {
+        const codsMeso = new Set(
+          Object.entries(geoMap)
+            .filter(([, info]) => info.mesorregiao === filtros.mesorregiao)
+            .map(([cod]) => cod)
+        )
+        munsFiltered = Object.fromEntries(
+          Object.entries(munsFiltered).filter(([cod]) => codsMeso.has(cod))
+        )
+      }
+
+      if (filtros.municipio !== 'todos') {
+        munsFiltered = Object.fromEntries(
+          Object.entries(munsFiltered).filter(([cod]) => cod === filtros.municipio)
+        )
+      }
+
+      if (filtros.anoInicio && filtros.anoFim) {
+        const newMuns = {}
+        for (const [cod, mun] of Object.entries(munsFiltered)) {
+          const dadosFilt = {}
+          for (const [anoStr, dados] of Object.entries(mun.dados || {})) {
+            const ano = parseInt(anoStr)
+            if (ano >= filtros.anoInicio && ano <= filtros.anoFim) {
+              dadosFilt[anoStr] = dados
+            }
+          }
+          newMuns[cod] = { ...mun, dados: dadosFilt }
+        }
+        munsFiltered = newMuns
+      }
+
+      return { ...dataset, municipios: munsFiltered }
     }
 
     return {
-      criminalidade: {
-        ...dados.criminalidade,
-        municipios: filterArray(dados.criminalidade.municipios),
-      },
-      violenciaLetal: {
-        ...dados.violenciaLetal,
-        municipios: filterArray(dados.violenciaLetal?.municipios),
-      },
-      patrimonio: {
-        ...dados.patrimonio,
-        municipios: filterArray(dados.patrimonio?.municipios),
-      },
-      drogas: {
-        ...dados.drogas,
-        municipios: filterArray(dados.drogas?.municipios),
-      },
-      atlas: dados.atlas,
-      geojson: dados.geojson,
-      metadata: dados.metadata,
+      criminalidade: filtrarMunicipios(criminalidade),
+      violenciaLetal: filtrarMunicipios(violenciaLetal),
+      patrimonio: filtrarMunicipios(patrimonio),
+      drogas: filtrarMunicipios(drogas),
     }
-  }, [dados, filtros])
+  }, [criminalidade, violenciaLetal, patrimonio, drogas, geoMap, filtros])
 
-  const resetFiltros = useCallback(() => {
-    setFiltros(INITIAL_FILTROS)
+  const setFiltros = useCallback((updates) => {
+    setFiltrosState(f => ({ ...f, ...updates }))
   }, [])
 
   return {
     loading,
     erro,
-    dados,
+    criminalidade,
+    violenciaLetal,
+    patrimonio,
+    drogas,
+    serieHistorica,
+    atlasViolencia,
+    geoData,
+    geoMap,
+    metadata,
     filtros,
     setFiltros,
-    resetFiltros,
     anos,
     mesorregioes,
     municipios,

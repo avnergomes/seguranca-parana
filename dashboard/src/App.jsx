@@ -21,7 +21,13 @@ function App() {
   const {
     loading,
     erro,
-    dados,
+    violenciaLetal: vlRaw,
+    patrimonio: patRaw,
+    serieHistorica,
+    atlasViolencia,
+    geoData,
+    geoMap,
+    metadata,
     filtros,
     setFiltros,
     anos,
@@ -54,13 +60,12 @@ function App() {
     )
   }
 
-  const metadata = dadosFiltrados?.metadata || {}
   const crim = dadosFiltrados?.criminalidade || {}
   const vl = dadosFiltrados?.violenciaLetal || {}
   const pat = dadosFiltrados?.patrimonio || {}
   const drogas = dadosFiltrados?.drogas || {}
-  const atlas = dadosFiltrados?.atlas || {}
-  const geojson = dadosFiltrados?.geojson || null
+  const atlas = atlasViolencia || {}
+  const geojson = geoData || null
 
   return (
     <div className="min-h-screen bg-neutral-50">
