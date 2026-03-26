@@ -3,7 +3,7 @@
 download_data.py - Downloads raw data from all 6 sources for Segurança Paraná.
 
 Sources:
-  1. SINESP/MJ (XLSX municipal + UF)
+  1. SINESP/MJ (XLSX municipal + UF) — resolved via CKAN API
   2. IPARDES (delegates to scrape_ipardes.py)
   3. Atlas da Violência / IPEA
   4. SESP-PR / CAPE (PDF catalog 2007-2025)
@@ -11,20 +11,117 @@ Sources:
   6. Base dos Dados / FBSP
 """
 
+from __future__ import annotations
+
+import argparse
+import logging
 import os
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
+from email.utils import formatdate, parsedate_to_datetime
 from pathlib import Path
+from typing import NamedTuple
 
 import requests
+
+logger = logging.getLogger("download_data")
 
 BASE_DIR = Path(__file__).parent.parent
 RAW_DIR = BASE_DIR / "data" / "raw"
 
 # ---------------------------------------------------------------------------
+# Immutable result tracking
+# ---------------------------------------------------------------------------
+
+
+class DownloadResult(NamedTuple):
+    source: str
+    file: str
+    status: str  # "ok" | "fail" | "skip"
+
+
+@dataclass(frozen=True)
+class DownloadSummary:
+    results: tuple[DownloadResult, ...] = ()
+
+    @property
+    def ok(self) -> int:
+        return sum(1 for r in self.results if r.status == "ok")
+
+    @property
+    def fail(self) -> int:
+        return sum(1 for r in self.results if r.status == "fail")
+
+    @property
+    def skip(self) -> int:
+        return sum(1 for r in self.results if r.status == "skip")
+
+    def add(self, result: DownloadResult) -> "DownloadSummary":
+        """Return a new summary with the result appended (immutable)."""
+        return DownloadSummary(results=self.results + (result,))
+
+
+# ---------------------------------------------------------------------------
+# Retry wrapper
+# ---------------------------------------------------------------------------
+
+_MAX_RETRIES = 3
+_BACKOFF_SECONDS = (2, 4, 8)
+assert len(_BACKOFF_SECONDS) >= _MAX_RETRIES - 1, \
+    "BACKOFF_SECONDS must have at least MAX_RETRIES-1 entries"
+
+
+def _request_with_retry(
+    method: str,
+    url: str,
+    *,
+    timeout: int = 120,
+    stream: bool = False,
+    headers: dict[str, str] | None = None,
+    params: dict[str, str] | None = None,
+    allow_304: bool = False,
+) -> requests.Response:
+    """Execute an HTTP request with exponential-backoff retry (3 attempts).
+
+    When *allow_304* is True, HTTP 304 responses are returned without raising.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            resp = requests.request(
+                method,
+                url,
+                timeout=timeout,
+                stream=stream,
+                headers=headers or {},
+                params=params or {},
+            )
+            if allow_304 and resp.status_code == 304:
+                return resp
+            resp.raise_for_status()
+            return resp
+        except (requests.RequestException, OSError) as exc:
+            last_exc = exc
+            if attempt < _MAX_RETRIES - 1:
+                delay = _BACKOFF_SECONDS[attempt]
+                logger.warning(
+                    "Attempt %d/%d failed for %s: %s — retrying in %ds",
+                    attempt + 1,
+                    _MAX_RETRIES,
+                    url,
+                    exc,
+                    delay,
+                )
+                time.sleep(delay)
+    raise last_exc  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _ensure_dirs() -> None:
     """Create all required subdirectories inside data/raw."""
@@ -32,64 +129,207 @@ def _ensure_dirs() -> None:
         (RAW_DIR / sub).mkdir(parents=True, exist_ok=True)
 
 
-def _download(url: str, dest: Path, *, timeout: int = 120) -> bool:
-    """Download *url* to *dest*.  Returns True on success."""
-    if dest.exists():
-        print(f"  [skip] {dest.name} already exists")
-        return True
-    print(f"  [GET]  {url}")
+def _download(
+    url: str,
+    dest: Path,
+    *,
+    force: bool = True,
+    timeout: int = 120,
+) -> str:
+    """Download *url* to *dest*.
+
+    Returns:
+        "ok"   – file was (re-)downloaded successfully
+        "skip" – file was fresh (force=False + server says not modified)
+        raises on unrecoverable failure
+    """
+    headers: dict[str, str] = {}
+
+    if dest.exists() and not force:
+        # Conditional GET — use If-Modified-Since if we have a local copy
+        mtime = dest.stat().st_mtime
+        headers["If-Modified-Since"] = formatdate(mtime, usegmt=True)
+
+    logger.info("  [GET]  %s", url)
+
+    resp = _request_with_retry(
+        "GET", url, timeout=timeout, stream=True, headers=headers,
+        allow_304=bool(headers.get("If-Modified-Since")),
+    )
+
+    if resp.status_code == 304:
+        logger.info("         -> %s  (not modified)", dest.name)
+        return "skip"
+
+    # Stream to disk
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+    written = 0
     try:
-        resp = requests.get(url, timeout=timeout, stream=True)
-        resp.raise_for_status()
-        with open(dest, "wb") as fh:
+        with open(tmp, "wb") as fh:
             for chunk in resp.iter_content(chunk_size=1 << 16):
                 fh.write(chunk)
-        size_kb = dest.stat().st_size / 1024
-        print(f"         -> {dest.name}  ({size_kb:.0f} KB)")
-        return True
+                written += len(chunk)
+
+        # Content-Length validation
+        expected = resp.headers.get("Content-Length")
+        if expected is not None and int(expected) != written:
+            tmp.unlink(missing_ok=True)
+            raise IOError(
+                f"Size mismatch for {dest.name}: "
+                f"expected {expected} bytes, got {written}"
+            )
+
+        # Atomic replace
+        tmp.replace(dest)
+
+        # Preserve Last-Modified as mtime for future conditional GETs
+        last_mod = resp.headers.get("Last-Modified")
+        if last_mod:
+            try:
+                ts = parsedate_to_datetime(last_mod).timestamp()
+                os.utime(dest, (ts, ts))
+            except Exception:
+                pass
+
+        size_kb = written / 1024
+        logger.info("         -> %s  (%.0f KB)", dest.name, size_kb)
+        return "ok"
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _safe_download(
+    url: str,
+    dest: Path,
+    *,
+    source: str,
+    force: bool = True,
+    timeout: int = 120,
+) -> DownloadResult:
+    """Wrapper around _download that catches errors and returns a result."""
+    try:
+        status = _download(url, dest, force=force, timeout=timeout)
+        return DownloadResult(source=source, file=dest.name, status=status)
     except Exception as exc:
-        print(f"  [FAIL] {exc}")
-        if dest.exists():
-            dest.unlink()
-        return False
+        logger.error("  [FAIL] %s: %s", dest.name, exc)
+        return DownloadResult(source=source, file=dest.name, status="fail")
 
 
 # ---------------------------------------------------------------------------
-# 1. SINESP / Ministério da Justiça
+# 1. SINESP / Ministério da Justiça  — dynamic CKAN resolution
 # ---------------------------------------------------------------------------
 
-SINESP_URLS = {
+CKAN_API_URL = "https://dados.mj.gov.br/api/3/action/package_show"
+CKAN_DATASET_ID = "sistema-nacional-de-estatisticas-de-seguranca-publica"
+
+# Patterns to identify the two SINESP resources by name
+_SINESP_MUNIC_PATTERNS = ("municip", "munic")
+_SINESP_UF_PATTERNS = ("uf",)
+
+# Hardcoded fallback URLs — used when the CKAN API is unreachable
+_SINESP_FALLBACK_URLS: dict[str, str] = {
     "indicadores_municipios.xlsx": (
-        "http://dados.mj.gov.br/dataset/210b9ae2-21fc-4986-89c6-2006eb4db247"
-        "/resource/03af7ce2-174e-4ebd-b085-384503cfb40f"
-        "/download/indicadoressegurancapublicamunic.xlsx"
+        "https://dados.mj.gov.br/dataset/"
+        "210b9ae2-21fc-4986-89c6-2006eb4db247/resource/"
+        "03af7ce2-174e-4886-89c5-4ad97e684c8b/download/"
+        "indicadoressegurancapublicamunic1702to202312.xlsx"
     ),
     "indicadores_uf.xlsx": (
-        "http://dados.mj.gov.br/dataset/210b9ae2-21fc-4986-89c6-2006eb4db247"
-        "/resource/feeae05e-faba-406c-8a4a-512aec91a9d1"
-        "/download/indicadoressegurancapublicauf.xlsx"
+        "https://dados.mj.gov.br/dataset/"
+        "210b9ae2-21fc-4986-89c6-2006eb4db247/resource/"
+        "fecee826-73de-4871-a33e-cb014e1540c0/download/"
+        "indicadoressegurancapublicauf.xlsx"
     ),
 }
 
 
-def download_sinesp() -> None:
-    print("\n=== 1. SINESP / MJ ===")
+def _resolve_sinesp_urls() -> dict[str, str]:
+    """Query the CKAN API to resolve current SINESP download URLs.
+
+    Returns a dict mapping local filename -> download URL.
+    """
+    logger.info("  Querying CKAN API for SINESP resources...")
+    resp = _request_with_retry(
+        "GET",
+        CKAN_API_URL,
+        timeout=30,
+        headers={"Accept": "application/json"},
+        params={"id": CKAN_DATASET_ID},
+    )
+    data = resp.json()
+
+    if not data.get("success"):
+        raise RuntimeError(f"CKAN API returned success=false: {data}")
+
+    resources = data["result"]["resources"]
+    xlsx_resources = [r for r in resources if r.get("format", "").upper() == "XLSX"]
+
+    urls: dict[str, str] = {}
+
+    for res in xlsx_resources:
+        name_lower = res.get("name", "").lower()
+        url = res.get("url", "")
+        if not url:
+            continue
+
+        if any(pat in name_lower for pat in _SINESP_MUNIC_PATTERNS):
+            urls["indicadores_municipios.xlsx"] = url
+        elif any(pat in name_lower for pat in _SINESP_UF_PATTERNS):
+            urls["indicadores_uf.xlsx"] = url
+
+    if len(urls) < 2:
+        logger.warning(
+            "  CKAN returned %d XLSX resources (expected 2). Found: %s",
+            len(urls),
+            list(urls.keys()),
+        )
+
+    return urls
+
+
+def download_sinesp(force: bool = True) -> DownloadSummary:
+    logger.info("\n=== 1. SINESP / MJ ===")
     dest_dir = RAW_DIR / "sinesp"
-    for fname, url in SINESP_URLS.items():
-        _download(url, dest_dir / fname)
+    summary = DownloadSummary()
+
+    try:
+        sinesp_urls = _resolve_sinesp_urls()
+    except Exception as exc:
+        logger.warning(
+            "  CKAN API failed (%s) — falling back to hardcoded URLs", exc
+        )
+        sinesp_urls = _SINESP_FALLBACK_URLS
+
+    for fname, url in sinesp_urls.items():
+        result = _safe_download(
+            url, dest_dir / fname, source="sinesp", force=force
+        )
+        summary = summary.add(result)
+
+    return summary
 
 
 # ---------------------------------------------------------------------------
 # 2. IPARDES  (delegates to scrape_ipardes.py)
 # ---------------------------------------------------------------------------
 
-def download_ipardes() -> None:
-    print("\n=== 2. IPARDES ===")
+
+def download_ipardes() -> DownloadSummary:
+    logger.info("\n=== 2. IPARDES ===")
     script = Path(__file__).parent / "scrape_ipardes.py"
     if not script.exists():
-        print("  [WARN] scrape_ipardes.py not found – skipping")
-        return
-    subprocess.run([sys.executable, str(script)], check=False)
+        logger.warning("  scrape_ipardes.py not found - skipping")
+        return DownloadSummary(
+            results=(DownloadResult(source="ipardes", file="scrape_ipardes.py", status="skip"),)
+        )
+    result = subprocess.run([sys.executable, str(script)], check=False)
+    status = "ok" if result.returncode == 0 else "fail"
+    if status == "fail":
+        logger.error("  scrape_ipardes.py exited with code %d", result.returncode)
+    return DownloadSummary(
+        results=(DownloadResult(source="ipardes", file=script.name, status=status),)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +342,15 @@ ATLAS_URL = (
 )
 
 
-def download_atlas() -> None:
-    print("\n=== 3. Atlas da Violência / IPEA ===")
-    _download(ATLAS_URL, RAW_DIR / "atlas" / "atlas_violencia.xlsx")
+def download_atlas(force: bool = True) -> DownloadSummary:
+    logger.info("\n=== 3. Atlas da Violência / IPEA ===")
+    result = _safe_download(
+        ATLAS_URL,
+        RAW_DIR / "atlas" / "atlas_violencia.xlsx",
+        source="atlas",
+        force=force,
+    )
+    return DownloadSummary(results=(result,))
 
 
 # ---------------------------------------------------------------------------
@@ -186,21 +432,20 @@ SESP_PDFS: dict[str, str] = {
 # fmt: on
 
 
-def download_sesp_pr() -> None:
-    print("\n=== 4. SESP-PR / CAPE  (PDF catalog) ===")
+def download_sesp_pr(force: bool = True) -> DownloadSummary:
+    logger.info("\n=== 4. SESP-PR / CAPE  (PDF catalog) ===")
     dest_dir = RAW_DIR / "sesp_pr"
-    ok = fail = skip = 0
+    summary = DownloadSummary()
+
     for fname, url in SESP_PDFS.items():
         dest = dest_dir / fname
-        if dest.exists():
-            skip += 1
-            continue
-        if _download(url, dest):
-            ok += 1
-        else:
-            fail += 1
+        result = _safe_download(
+            url, dest, source="sesp_pr", force=force
+        )
+        summary = summary.add(result)
         time.sleep(0.5)  # be polite
-    print(f"  SESP-PR totals: {ok} downloaded, {skip} skipped, {fail} failed")
+
+    return summary
 
 
 # ---------------------------------------------------------------------------
@@ -218,10 +463,16 @@ SIDRA_URL = (
 )
 
 
-def download_ibge() -> None:
-    print("\n=== 5. IBGE SIDRA (population) ===")
-    dest = RAW_DIR / "ibge" / "populacao_municipios.json"
-    _download(SIDRA_URL, dest, timeout=180)
+def download_ibge(force: bool = True) -> DownloadSummary:
+    logger.info("\n=== 5. IBGE SIDRA (population) ===")
+    result = _safe_download(
+        SIDRA_URL,
+        RAW_DIR / "ibge" / "populacao_municipios.json",
+        source="ibge",
+        force=force,
+        timeout=180,
+    )
+    return DownloadSummary(results=(result,))
 
 
 # ---------------------------------------------------------------------------
@@ -235,14 +486,17 @@ BASEDOSDADOS_URL = (
 )
 
 
-def download_basedosdados() -> None:
-    print("\n=== 6. Base dos Dados / FBSP ===")
-    print("  Base dos Dados requires BigQuery access.")
-    print(f"  Dataset page: {BASEDOSDADOS_URL}")
-    print("  To download programmatically:")
-    print("    pip install basedosdados")
-    print("    import basedosdados as bd")
-    print('    df = bd.read_table("br_fbsp_atlas_violencia", "municipio", billing_project_id="SEU_PROJETO")')
+def download_basedosdados() -> DownloadSummary:
+    logger.info("\n=== 6. Base dos Dados / FBSP ===")
+    logger.info("  Base dos Dados requires BigQuery access.")
+    logger.info("  Dataset page: %s", BASEDOSDADOS_URL)
+    logger.info("  To download programmatically:")
+    logger.info("    pip install basedosdados")
+    logger.info("    import basedosdados as bd")
+    logger.info(
+        '    df = bd.read_table("br_fbsp_atlas_violencia", "municipio",'
+        ' billing_project_id="SEU_PROJETO")'
+    )
     dest = RAW_DIR / "basedosdados" / "README_manual.txt"
     if not dest.exists():
         dest.write_text(
@@ -258,26 +512,76 @@ def download_basedosdados() -> None:
             '  df.to_csv("atlas_fbsp.csv", index=False)\n',
             encoding="utf-8",
         )
-        print(f"  Wrote instructions to {dest}")
+        logger.info("  Wrote instructions to %s", dest)
+
+    return DownloadSummary(
+        results=(DownloadResult(source="basedosdados", file="README_manual.txt", status="skip"),)
+    )
 
 
 # ---------------------------------------------------------------------------
-# Main
+# CLI and main
 # ---------------------------------------------------------------------------
 
-def main() -> None:
-    print(f"Base dir : {BASE_DIR}")
-    print(f"Raw dir  : {RAW_DIR}")
+
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Download raw data for Segurança Paraná.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help=(
+            "Force re-download of all files. When omitted, uses "
+            "If-Modified-Since to skip fresh files."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    args = _parse_args(argv)
+    force = args.force
+
+    logger.info("Base dir : %s", BASE_DIR)
+    logger.info("Raw dir  : %s", RAW_DIR)
+    logger.info("Force    : %s", force)
     _ensure_dirs()
 
-    download_sinesp()
-    download_ipardes()
-    download_atlas()
-    download_sesp_pr()
-    download_ibge()
-    download_basedosdados()
+    # Accumulate results immutably
+    summary = DownloadSummary()
+    for download_fn in (
+        lambda: download_sinesp(force=force),
+        download_ipardes,
+        lambda: download_atlas(force=force),
+        lambda: download_sesp_pr(force=force),
+        lambda: download_ibge(force=force),
+        download_basedosdados,
+    ):
+        partial = download_fn()
+        for r in partial.results:
+            summary = summary.add(r)
 
-    print("\n=== Done ===")
+    # Final summary
+    logger.info("\n=== Download Summary ===")
+    logger.info("  OK   : %d", summary.ok)
+    logger.info("  Skip : %d", summary.skip)
+    logger.info("  Fail : %d", summary.fail)
+
+    if summary.fail > 0:
+        logger.error("Failed downloads:")
+        for r in summary.results:
+            if r.status == "fail":
+                logger.error("  - [%s] %s", r.source, r.file)
+
+    logger.info("=== Done ===")
 
 
 if __name__ == "__main__":

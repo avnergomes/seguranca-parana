@@ -18,6 +18,7 @@ Output files (all in data/processed/):
 """
 
 import json
+import logging
 import shutil
 import sys
 from datetime import datetime
@@ -28,9 +29,17 @@ import numpy as np
 import pandas as pd
 import requests
 
+logger = logging.getLogger(__name__)
+
 BASE_DIR = Path(__file__).parent.parent
 RAW_DIR = BASE_DIR / "data" / "raw"
 OUT_DIR = BASE_DIR / "dashboard" / "public" / "data"
+
+IBGE_POP_JSON = RAW_DIR / "ibge" / "populacao_municipios.json"
+IBGE_POP_CSV = RAW_DIR / "ibge" / "populacao_estimada_pr.csv"
+IBGE_SIDRA_URL = (
+    "https://apisidra.ibge.gov.br/values/t/6579/n6/in%20n3%2041/v/9324/p/all/f/n"
+)
 
 # Portuguese month names -> month number
 MES_PT: dict[str, int] = {
@@ -69,6 +78,144 @@ CRIMES_SEXUAL = {
 
 
 # ---------------------------------------------------------------------------
+# Population data
+# ---------------------------------------------------------------------------
+
+def _load_population_from_json(path: Path) -> tuple[dict[int, dict[int, int]], str]:
+    """
+    Load IBGE SIDRA population data from a local JSON file.
+
+    Returns (pop_lookup, source_label) where pop_lookup maps
+    cod_ibge -> {year -> population}.
+    """
+    logger.info("Loading population data from %s", path.name)
+    with open(path, encoding="utf-8") as f:
+        raw = json.load(f)
+
+    pop: dict[int, dict[int, int]] = {}
+    # SIDRA JSON: first row is header, subsequent rows are data
+    for entry in raw[1:] if isinstance(raw, list) and len(raw) > 1 else raw:
+        try:
+            cod_str = str(entry.get("D3C", entry.get("cod_ibge", "")))
+            year_str = str(entry.get("D4C", entry.get("ano", "")))
+            val_str = str(entry.get("V", entry.get("populacao", "0")))
+            cod = int(cod_str)
+            year = int(year_str)
+            val = int(float(val_str))
+            pop.setdefault(cod, {})[year] = val
+        except (ValueError, TypeError):
+            continue
+
+    logger.info("Loaded population for %d municipalities from JSON", len(pop))
+    return pop, "ibge_sidra_json_local"
+
+
+def _load_population_from_csv(path: Path) -> tuple[dict[int, dict[int, int]], str]:
+    """
+    Load IBGE population estimates from the local CSV file.
+
+    The CSV has columns: cod_ibge, municipio, ano, populacao.
+    The 'ano' column may contain descriptive text instead of a year number;
+    in that case we treat the estimate as year-agnostic (applied to all years).
+    """
+    logger.info("Loading population data from %s", path.name)
+    df = pd.read_csv(path, dtype={"cod_ibge": int, "populacao": int})
+    pop: dict[int, dict[int, int]] = {}
+
+    for rec in df.to_dict(orient="records"):
+        cod = int(rec["cod_ibge"])
+        populacao = int(rec["populacao"])
+        try:
+            year = int(rec["ano"])
+        except (ValueError, TypeError):
+            # Year-agnostic estimate: store under key 0
+            year = 0
+        pop.setdefault(cod, {})[year] = populacao
+
+    logger.info("Loaded population for %d municipalities from CSV", len(pop))
+    return pop, "ibge_estimativa_csv_local"
+
+
+def _fetch_population_from_api() -> tuple[dict[int, dict[int, int]], str]:
+    """
+    Fetch IBGE SIDRA population data directly from the API.
+    Table 6579 - Population estimates for Paraná municipalities.
+    """
+    logger.info("Fetching population data from IBGE SIDRA API ...")
+    try:
+        resp = requests.get(IBGE_SIDRA_URL, timeout=60)
+        resp.raise_for_status()
+        raw = resp.json()
+    except Exception as exc:
+        logger.warning("IBGE SIDRA API request failed: %s", exc)
+        return {}, "ibge_sidra_api_failed"
+
+    pop: dict[int, dict[int, int]] = {}
+    for entry in raw[1:] if isinstance(raw, list) and len(raw) > 1 else raw:
+        try:
+            cod = int(entry.get("D3C", ""))
+            year = int(entry.get("D4C", ""))
+            val = int(float(entry.get("V", "0")))
+            pop.setdefault(cod, {})[year] = val
+        except (ValueError, TypeError):
+            continue
+
+    logger.info("Fetched population for %d municipalities from API", len(pop))
+    return pop, "ibge_sidra_api"
+
+
+def load_population() -> tuple[dict[int, dict[int, int]], str]:
+    """
+    Load population data, trying sources in priority order:
+    1. Local JSON (IBGE SIDRA table 6579)
+    2. Local CSV (populacao_estimada_pr.csv)
+    3. IBGE SIDRA API (live fetch)
+
+    Returns (pop_lookup, source_label).
+    pop_lookup: cod_ibge -> {year -> population}
+    Year key 0 means year-agnostic estimate.
+    """
+    if IBGE_POP_JSON.exists():
+        return _load_population_from_json(IBGE_POP_JSON)
+
+    if IBGE_POP_CSV.exists():
+        return _load_population_from_csv(IBGE_POP_CSV)
+
+    return _fetch_population_from_api()
+
+
+def _get_population(
+    pop_lookup: dict[int, dict[int, int]],
+    cod_ibge: int,
+    year: int,
+) -> int | None:
+    """
+    Look up population for a municipality and year.
+    Falls back to year-agnostic estimate (key 0) if exact year not found.
+    """
+    by_year = pop_lookup.get(cod_ibge)
+    if by_year is None:
+        return None
+    if year in by_year:
+        return by_year[year]
+    if 0 in by_year:
+        return by_year[0]
+    # Fall back to closest available year
+    available = sorted(by_year.keys())
+    if not available:
+        return None
+    closest = min(available, key=lambda y: abs(y - year) if y != 0 else float("inf"))
+    return by_year.get(closest)
+
+
+def _calc_rate(vitimas: int, populacao: int | None) -> float | None:
+    """Calculate per-100k rate. Returns None if population is unavailable or zero."""
+    if populacao is None or populacao <= 0:
+        return None
+    return round((vitimas / populacao) * 100_000, 2)
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
@@ -80,7 +227,7 @@ def _save_json(data: Any, name: str) -> None:
         encoding="utf-8",
     )
     size_kb = dest.stat().st_size / 1024
-    print(f"  [OK] {name}  ({size_kb:.1f} KB)")
+    logger.info("[OK] %s  (%.1f KB)", name, size_kb)
 
 
 # ---------------------------------------------------------------------------
@@ -107,10 +254,10 @@ def load_municipios() -> pd.DataFrame:
     """
     path = RAW_DIR / "sinesp" / "indicadores_municipios.xlsx"
     if not path.exists():
-        print(f"  [WARN] {path} not found - run download_data.py first")
+        logger.warning("%s not found - run download_data.py first", path)
         return pd.DataFrame()
 
-    print(f"  Reading {path.name} sheet='PR' ...")
+    logger.info("Reading %s sheet='PR' ...", path.name)
     df = pd.read_excel(path, sheet_name="PR")
 
     # Positional rename (safe against encoding issues)
@@ -132,8 +279,11 @@ def load_municipios() -> pd.DataFrame:
     df["mes"] = df["mes_ano"].dt.month
 
     df = df.dropna(subset=["cod_ibge", "mes_ano"])
-    print(f"  {len(df)} rows, {df['cod_ibge'].nunique()} municipalities, "
-          f"{df['ano'].min()}-{df['ano'].max()}")
+    logger.info(
+        "%d rows, %d municipalities, %d-%d",
+        len(df), df["cod_ibge"].nunique(),
+        df["ano"].min(), df["ano"].max(),
+    )
     return df
 
 
@@ -157,10 +307,10 @@ def load_uf() -> pd.DataFrame:
     """
     path = RAW_DIR / "sinesp" / "indicadores_uf.xlsx"
     if not path.exists():
-        print(f"  [WARN] {path} not found - run download_data.py first")
+        logger.warning("%s not found - run download_data.py first", path)
         return pd.DataFrame()
 
-    print(f"  Reading {path.name} sheet='Ocorrências' ...")
+    logger.info("Reading %s sheet='Ocorrências' ...", path.name)
     df = pd.read_excel(path, sheet_name="Ocorrências")
 
     cols = list(df.columns)
@@ -190,8 +340,11 @@ def load_uf() -> pd.DataFrame:
     df = df.dropna(subset=["ano", "mes_num"])
     df["mes_num"] = df["mes_num"].astype(int)
 
-    print(f"  {len(df)} rows, {df['tipo_crime'].nunique()} crime types, "
-          f"{df['ano'].min()}-{df['ano'].max()}")
+    logger.info(
+        "%d rows, %d crime types, %d-%d",
+        len(df), df["tipo_crime"].nunique(),
+        df["ano"].min(), df["ano"].max(),
+    )
     return df
 
 
@@ -219,7 +372,7 @@ def load_uf_vitimas() -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
 
-    print(f"  Reading {path.name} sheet='Vítimas' ...")
+    logger.info("Reading %s sheet='Vítimas' ...", path.name)
     try:
         df = pd.read_excel(path, sheet_name="Vítimas")
     except Exception:
@@ -245,8 +398,11 @@ def load_uf_vitimas() -> pd.DataFrame:
     df = df.dropna(subset=["ano", "mes_num"])
     df["mes_num"] = df["mes_num"].astype(int)
 
-    print(f"  {len(df)} rows, {df['tipo_crime'].nunique()} crime types, "
-          f"sexos: {sorted(df['sexo'].unique())}")
+    logger.info(
+        "%d rows, %d crime types, sexos: %s",
+        len(df), df["tipo_crime"].nunique(),
+        sorted(df["sexo"].unique()),
+    )
     return df
 
 
@@ -254,20 +410,37 @@ def load_uf_vitimas() -> pd.DataFrame:
 # Output builders
 # ---------------------------------------------------------------------------
 
-def build_criminalidade(df_mun: pd.DataFrame) -> list[dict]:
+def build_criminalidade(
+    df_mun: pd.DataFrame,
+    pop_lookup: dict[int, dict[int, int]],
+    pop_fonte: str,
+) -> list[dict]:
     """Municipal-level vitimas data -> criminalidade.json"""
     if df_mun.empty:
         return []
 
     records = []
-    for _, row in df_mun.iterrows():
-        records.append({
-            "cod_ibge": int(row["cod_ibge"]),
-            "municipio": str(row["municipio"]).strip(),
-            "ano": int(row["ano"]),
-            "mes": int(row["mes"]),
-            "vitimas": int(row["vitimas"]),
-        })
+    for rec in df_mun[["cod_ibge", "municipio", "ano", "mes", "vitimas"]].to_dict(orient="records"):
+        cod = int(rec["cod_ibge"])
+        ano = int(rec["ano"])
+        vitimas = int(rec["vitimas"])
+        populacao = _get_population(pop_lookup, cod, ano)
+        taxa = _calc_rate(vitimas, populacao)
+
+        entry: dict[str, Any] = {
+            "cod_ibge": cod,
+            "municipio": str(rec["municipio"]).strip(),
+            "ano": ano,
+            "mes": int(rec["mes"]),
+            "vitimas": vitimas,
+        }
+        if populacao is not None:
+            entry["populacao"] = populacao
+        if taxa is not None:
+            entry["taxa_por_100k"] = taxa
+        entry["populacao_fonte"] = pop_fonte
+
+        records.append(entry)
     return records
 
 
@@ -277,15 +450,15 @@ def build_violencia_letal(df_uf: pd.DataFrame) -> list[dict]:
         return []
 
     subset = df_uf[df_uf["tipo_crime"].isin(CRIMES_LETAIS)].copy()
-    records = []
-    for _, row in subset.iterrows():
-        records.append({
-            "tipo_crime": str(row["tipo_crime"]),
-            "ano": int(row["ano"]),
-            "mes": int(row["mes_num"]),
-            "ocorrencias": int(row["ocorrencias"]),
-        })
-    return records
+    return [
+        {
+            "tipo_crime": str(rec["tipo_crime"]),
+            "ano": int(rec["ano"]),
+            "mes": int(rec["mes_num"]),
+            "ocorrencias": int(rec["ocorrencias"]),
+        }
+        for rec in subset[["tipo_crime", "ano", "mes_num", "ocorrencias"]].to_dict(orient="records")
+    ]
 
 
 def build_patrimonio(df_uf: pd.DataFrame) -> list[dict]:
@@ -294,15 +467,15 @@ def build_patrimonio(df_uf: pd.DataFrame) -> list[dict]:
         return []
 
     subset = df_uf[df_uf["tipo_crime"].isin(CRIMES_PATRIMONIO)].copy()
-    records = []
-    for _, row in subset.iterrows():
-        records.append({
-            "tipo_crime": str(row["tipo_crime"]),
-            "ano": int(row["ano"]),
-            "mes": int(row["mes_num"]),
-            "ocorrencias": int(row["ocorrencias"]),
-        })
-    return records
+    return [
+        {
+            "tipo_crime": str(rec["tipo_crime"]),
+            "ano": int(rec["ano"]),
+            "mes": int(rec["mes_num"]),
+            "ocorrencias": int(rec["ocorrencias"]),
+        }
+        for rec in subset[["tipo_crime", "ano", "mes_num", "ocorrencias"]].to_dict(orient="records")
+    ]
 
 
 def build_drogas() -> dict:
@@ -322,21 +495,22 @@ def build_vitimas_sexo(df_vit: pd.DataFrame) -> list[dict]:
     """UF victim data by sex -> vitimas_sexo.json"""
     if df_vit.empty:
         return []
-    records = []
-    for _, row in df_vit.iterrows():
-        records.append({
-            "tipo_crime": str(row["tipo_crime"]),
-            "ano": int(row["ano"]),
-            "mes": int(row["mes_num"]),
-            "sexo": str(row["sexo"]),
-            "vitimas": int(row["vitimas"]),
-        })
-    return records
+    return [
+        {
+            "tipo_crime": str(rec["tipo_crime"]),
+            "ano": int(rec["ano"]),
+            "mes": int(rec["mes_num"]),
+            "sexo": str(rec["sexo"]),
+            "vitimas": int(rec["vitimas"]),
+        }
+        for rec in df_vit[["tipo_crime", "ano", "mes_num", "sexo", "vitimas"]].to_dict(orient="records")
+    ]
 
 
 def build_serie_historica(
     df_mun: pd.DataFrame,
     df_uf: pd.DataFrame,
+    pop_lookup: dict[int, dict[int, int]],
 ) -> dict:
     """
     Combined time series:
@@ -355,10 +529,28 @@ def build_serie_historica(
             .reset_index()
             .sort_values(["ano", "mes"])
         )
-        result["mensal_municipal"] = [
-            {"ano": int(r["ano"]), "mes": int(r["mes"]), "vitimas": int(r["vitimas"])}
-            for _, r in mensal.iterrows()
-        ]
+        # Compute total state population per year for rate calculation
+        state_pop_by_year: dict[int, int] = {}
+        for year in mensal["ano"].unique():
+            total = 0
+            for cod, by_year in pop_lookup.items():
+                p = by_year.get(int(year))  # exact year only, no fallback
+                if p is not None:
+                    total += p
+            if total > 0:
+                state_pop_by_year[int(year)] = total
+
+        mensal_records = []
+        for rec in mensal.to_dict(orient="records"):
+            ano = int(rec["ano"])
+            vitimas = int(rec["vitimas"])
+            entry: dict[str, Any] = {"ano": ano, "mes": int(rec["mes"]), "vitimas": vitimas}
+            state_pop = state_pop_by_year.get(ano)
+            taxa = _calc_rate(vitimas, state_pop)
+            if taxa is not None:
+                entry["taxa_por_100k"] = taxa
+            mensal_records.append(entry)
+        result["mensal_municipal"] = mensal_records
 
         anual = (
             df_mun.groupby("ano")["vitimas"]
@@ -366,10 +558,19 @@ def build_serie_historica(
             .reset_index()
             .sort_values("ano")
         )
-        result["anual_municipal"] = [
-            {"ano": int(r["ano"]), "vitimas": int(r["vitimas"])}
-            for _, r in anual.iterrows()
-        ]
+        anual_records = []
+        for rec in anual.to_dict(orient="records"):
+            ano = int(rec["ano"])
+            vitimas = int(rec["vitimas"])
+            entry_a: dict[str, Any] = {"ano": ano, "vitimas": vitimas}
+            state_pop = state_pop_by_year.get(ano)
+            # For annual, multiply monthly rate base by 12 is wrong;
+            # use annual vitimas / population directly
+            taxa = _calc_rate(vitimas, state_pop)
+            if taxa is not None:
+                entry_a["taxa_por_100k"] = taxa
+            anual_records.append(entry_a)
+        result["anual_municipal"] = anual_records
     else:
         result["mensal_municipal"] = []
         result["anual_municipal"] = []
@@ -384,12 +585,12 @@ def build_serie_historica(
         )
         result["mensal_uf_tipo"] = [
             {
-                "tipo_crime": str(r["tipo_crime"]),
-                "ano": int(r["ano"]),
-                "mes": int(r["mes_num"]),
-                "ocorrencias": int(r["ocorrencias"]),
+                "tipo_crime": str(rec["tipo_crime"]),
+                "ano": int(rec["ano"]),
+                "mes": int(rec["mes_num"]),
+                "ocorrencias": int(rec["ocorrencias"]),
             }
-            for _, r in mensal_tipo.iterrows()
+            for rec in mensal_tipo.to_dict(orient="records")
         ]
 
         anual_tipo = (
@@ -400,11 +601,11 @@ def build_serie_historica(
         )
         result["anual_uf_tipo"] = [
             {
-                "tipo_crime": str(r["tipo_crime"]),
-                "ano": int(r["ano"]),
-                "ocorrencias": int(r["ocorrencias"]),
+                "tipo_crime": str(rec["tipo_crime"]),
+                "ano": int(rec["ano"]),
+                "ocorrencias": int(rec["ocorrencias"]),
             }
-            for _, r in anual_tipo.iterrows()
+            for rec in anual_tipo.to_dict(orient="records")
         ]
     else:
         result["mensal_uf_tipo"] = []
@@ -420,21 +621,22 @@ def build_atlas_violencia() -> dict:
     """
     path = RAW_DIR / "atlas" / "atlas_violencia.xlsx"
     if not path.exists():
-        print("  [WARN] Atlas da Violência XLSX not found")
+        logger.warning("Atlas da Violência XLSX not found")
         return {"nota": "Arquivo não encontrado. Execute download_data.py.", "dados": []}
 
     try:
-        print(f"  Reading {path.name} ...")
+        logger.info("Reading %s ...", path.name)
         df = pd.read_excel(path)
 
         # Atlas structure varies; try to find Paraná rows
-        # Common columns: sigla_uf or nome_uf, ano, taxa_homicidio, etc.
+        # Known UF column patterns (tried in priority order)
         col_lower = {c: c.lower().strip() for c in df.columns}
         df = df.rename(columns=col_lower)
 
-        # Try filtering for PR
+        # Try filtering for PR using known column name patterns
+        uf_col_candidates = ("sigla_uf", "uf", "nome_uf", "estado")
         uf_col = None
-        for candidate in ("sigla_uf", "uf", "nome_uf", "estado"):
+        for candidate in uf_col_candidates:
             if candidate in df.columns:
                 uf_col = candidate
                 break
@@ -442,17 +644,41 @@ def build_atlas_violencia() -> dict:
         if uf_col is not None:
             mask = df[uf_col].astype(str).str.strip().str.upper().isin({"PR", "PARANÁ"})
             df_pr = df[mask].copy()
+            if df_pr.empty:
+                logger.warning(
+                    "Atlas: UF column '%s' found but no PR/PARANÁ rows matched. "
+                    "Unique values: %s",
+                    uf_col,
+                    df[uf_col].unique()[:10].tolist(),
+                )
         else:
+            logger.warning(
+                "Atlas: no UF column found. Tried columns: %s. "
+                "Available columns: %s. Using all rows.",
+                uf_col_candidates,
+                list(df.columns),
+            )
             df_pr = df.copy()
+
+        # Try to identify value columns for better error reporting
+        value_col_candidates = ("taxa_homicidio", "num_homicidios", "taxa")
+        found_value_cols = [c for c in value_col_candidates if c in df_pr.columns]
+        if not found_value_cols and not df_pr.empty:
+            logger.info(
+                "Atlas: none of the expected value columns %s found. "
+                "Available columns: %s",
+                value_col_candidates,
+                list(df_pr.columns),
+            )
 
         records = df_pr.to_dict(orient="records")
         # Convert numpy types to native Python
         clean = json.loads(json.dumps(records, default=str))
-        print(f"  {len(clean)} rows for Atlas da Violência")
+        logger.info("%d rows for Atlas da Violência", len(clean))
         return {"fonte": "IPEA / Atlas da Violência", "dados": clean}
 
     except Exception as exc:
-        print(f"  [FAIL] Could not parse Atlas XLSX: {exc}")
+        logger.error("Could not parse Atlas XLSX: %s", exc)
         return {"nota": f"Erro ao processar: {exc}", "dados": []}
 
 
@@ -461,35 +687,39 @@ def build_geo_map() -> list[dict]:
     Municipality -> mesoregion mapping via IBGE API.
     GET https://servicodados.ibge.gov.br/api/v1/localidades/estados/41/municipios
     """
-    print("  Fetching municipality -> mesoregion mapping from IBGE API ...")
+    logger.info("Fetching municipality -> mesoregion mapping from IBGE API ...")
     url = "https://servicodados.ibge.gov.br/api/v1/localidades/estados/41/municipios"
     try:
         resp = requests.get(url, timeout=30)
         resp.raise_for_status()
         data = resp.json()
     except Exception as exc:
-        print(f"  [FAIL] IBGE API: {exc}")
+        logger.error("IBGE API request failed: %s", exc)
         return []
 
-    records = []
-    for mun in data:
-        micro = mun.get("microrregiao", {})
-        meso = micro.get("mesorregiao", {})
-        records.append({
+    records = [
+        {
             "cod_ibge": mun["id"],
             "municipio": mun["nome"],
-            "microrregiao": micro.get("nome", ""),
-            "mesorregiao": meso.get("nome", ""),
-        })
+            "microrregiao": mun.get("microrregiao", {}).get("nome", ""),
+            "mesorregiao": mun.get("microrregiao", {}).get("mesorregiao", {}).get("nome", ""),
+        }
+        for mun in data
+    ]
 
-    print(f"  {len(records)} municipalities mapped")
+    logger.info("%d municipalities mapped", len(records))
     return records
 
 
-def build_metadata(df_mun: pd.DataFrame, df_uf: pd.DataFrame) -> dict:
+def build_metadata(
+    df_mun: pd.DataFrame,
+    df_uf: pd.DataFrame,
+    pop_fonte: str,
+) -> dict:
     """Dataset metadata summary."""
     meta: dict[str, Any] = {
         "gerado_em": datetime.now().isoformat(timespec="seconds"),
+        "populacao_fonte": pop_fonte,
         "fontes": {
             "sinesp_municipios": {
                 "arquivo": "indicadores_municipios.xlsx",
@@ -542,11 +772,11 @@ def copy_geojson() -> None:
     src = BASE_DIR / "mun_PR.json"
     dest = OUT_DIR / "municipios.geojson"
     if not src.exists():
-        print(f"  [WARN] {src} not found - skipping geojson copy")
+        logger.warning("%s not found - skipping geojson copy", src)
         return
     shutil.copy2(src, dest)
     size_kb = dest.stat().st_size / 1024
-    print(f"  [OK] municipios.geojson  ({size_kb:.1f} KB, copied from mun_PR.json)")
+    logger.info("[OK] municipios.geojson  (%.1f KB, copied from mun_PR.json)", size_kb)
 
 
 # ---------------------------------------------------------------------------
@@ -554,35 +784,47 @@ def copy_geojson() -> None:
 # ---------------------------------------------------------------------------
 
 def main() -> None:
-    print(f"Base dir : {BASE_DIR}")
-    print(f"Output   : {OUT_DIR}")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(message)s",
+        datefmt="%H:%M:%S",
+    )
+
+    logger.info("Base dir : %s", BASE_DIR)
+    logger.info("Output   : %s", OUT_DIR)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+    # Load population data
+    logger.info("--- Loading population data ---")
+    pop_lookup, pop_fonte = load_population()
+    if not pop_lookup:
+        logger.warning("No population data available - per-capita rates will be omitted")
+
     # Load raw data
-    print("\n--- Loading municipal data ---")
+    logger.info("--- Loading municipal data ---")
     df_mun = load_municipios()
 
-    print("\n--- Loading UF data ---")
+    logger.info("--- Loading UF data ---")
     df_uf = load_uf()
 
-    print("\n--- Loading UF victims by sex ---")
+    logger.info("--- Loading UF victims by sex ---")
     df_vit = load_uf_vitimas()
 
     # Build outputs
-    print("\n--- Building output JSONs ---")
+    logger.info("--- Building output JSONs ---")
 
-    _save_json(build_criminalidade(df_mun), "criminalidade.json")
+    _save_json(build_criminalidade(df_mun, pop_lookup, pop_fonte), "criminalidade.json")
     _save_json(build_violencia_letal(df_uf), "violencia_letal.json")
     _save_json(build_patrimonio(df_uf), "patrimonio.json")
     _save_json(build_vitimas_sexo(df_vit), "vitimas_sexo.json")
     _save_json(build_drogas(), "drogas.json")
-    _save_json(build_serie_historica(df_mun, df_uf), "serie_historica.json")
+    _save_json(build_serie_historica(df_mun, df_uf, pop_lookup), "serie_historica.json")
     _save_json(build_atlas_violencia(), "atlas_violencia.json")
     _save_json(build_geo_map(), "geo_map.json")
-    _save_json(build_metadata(df_mun, df_uf), "metadata.json")
+    _save_json(build_metadata(df_mun, df_uf, pop_fonte), "metadata.json")
     copy_geojson()
 
-    print("\n=== Preprocessing complete ===")
+    logger.info("=== Preprocessing complete ===")
 
 
 if __name__ == "__main__":

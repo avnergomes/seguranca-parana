@@ -36,6 +36,10 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r scripts/requirements.txt
 
+      # NOTE: This workflow does NOT download raw data.
+      # Raw data is downloaded and committed by the quarterly data-pipeline workflow.
+      # If raw data is missing (e.g. fresh clone without running data-pipeline first),
+      # preprocessing will produce empty JSONs. Run data-pipeline manually to populate data/.
       - name: Run data preprocessing
         run: python scripts/preprocess_data.py
 

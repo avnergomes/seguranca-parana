@@ -30,13 +30,20 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install pandas openpyxl numpy requests beautifulsoup4 pdfplumber
+        run: pip install -r scripts/requirements.txt
 
       - name: Download raw data
-        run: python scripts/download_data.py
+        run: python scripts/download_data.py --force
 
       - name: Preprocess data
         run: python scripts/preprocess_data.py
+
+      - name: Show data freshness
+        run: |
+          echo "=== Raw data files ==="
+          ls -lh data/ || echo "No raw data directory"
+          echo "=== Processed JSON files ==="
+          ls -lh dashboard/public/data/ || echo "No processed data directory"
 
       - name: Check for changes
         id: changes
@@ -48,6 +55,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/
+          git add data/ dashboard/public/data/
           git commit -m "chore: update quarterly crime data $(date +%Y-%m-%d)"
           git push
