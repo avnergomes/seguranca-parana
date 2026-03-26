@@ -1,0 +1,21 @@
+{
+  "source": "IPARDES Caderno Estatístico Municipal",
+  "base_url": "https://www.ipardes.pr.gov.br/Pagina/Cadernos-municipais",
+  "tableau_dashboards": [
+    {
+      "name": "Segurança Pública",
+      "url": "https://www.ipardes.pr.gov.br/Pagina/Cadernos-municipais",
+      "notes": "Select municipality, then 'Segurança Pública' tab. Data is rendered via Tableau Public embed. Export as CSV/Excel from within Tableau controls."
+    }
+  ],
+  "manual_steps": [
+    "1. Visit https://www.ipardes.pr.gov.br/Pagina/Cadernos-municipais",
+    "2. Select a municipality from the dropdown",
+    "3. Navigate to the 'Segurança Pública' section",
+    "4. In the Tableau embed, click the download icon (bottom-right)",
+    "5. Choose 'Crosstab' or 'Data' to export as CSV",
+    "6. Save to data/raw/ipardes/caderno_<municipio>.csv",
+    "7. Repeat for each municipality of interest (or use AISP groupings)"
+  ],
+  "alternative": "For bulk data, prefer Strategy 1 (basedosdados) or Strategy 2 (BDEweb). The Caderno is best for spot checks."
+}
