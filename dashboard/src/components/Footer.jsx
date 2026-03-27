@@ -47,12 +47,90 @@ function Footer() {
 
           <div>
             <h3 className="font-display font-bold text-dark-800 text-sm mb-2">
-              Sobre o Projeto
+              <a
+                href="https://datageoparana.github.io"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="hover:text-alert-600 inline-flex items-center gap-1 transition-colors"
+              >
+                Datageo Parana
+                <ExternalLink className="w-3 h-3" />
+              </a>
             </h3>
-            <p className="text-sm text-dark-400 leading-relaxed">
-              Dashboard de dados abertos de seguranca publica do estado do
-              Parana. Todos os dados sao publicos e obtidos de fontes oficiais.
-            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <a
+                href="https://avnergomes.github.io/vbp-parana/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                VBP Parana
+              </a>
+              <a
+                href="https://avnergomes.github.io/precos-diarios/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Precos Diarios
+              </a>
+              <a
+                href="https://avnergomes.github.io/precos-florestais/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Precos Florestais
+              </a>
+              <a
+                href="https://avnergomes.github.io/precos-de-terras/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Precos de Terras
+              </a>
+              <a
+                href="https://avnergomes.github.io/comexstat-parana/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                ComexStat Parana
+              </a>
+              <a
+                href="https://avnergomes.github.io/emprego-agro-parana/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Emprego Agro
+              </a>
+              <a
+                href="https://avnergomes.github.io/censo-parana/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Censo Parana
+              </a>
+              <a
+                href="https://avnergomes.github.io/credito-rural-parana/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Credito Rural
+              </a>
+              <a
+                href="https://avnergomes.github.io/saude-parana/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-2.5 py-1 text-[10px] rounded-full border border-slate-200 bg-white/70 text-slate-600 hover:text-alert-600 hover:border-alert-300 transition-colors"
+              >
+                Saude Parana
+              </a>
+            </div>
           </div>
 
           <div>
