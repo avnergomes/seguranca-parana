@@ -7,10 +7,17 @@
     <meta name="description" content="Painel interativo de indicadores de seguranca publica do estado do Parana. Dados abertos de criminalidade, violencia letal, crimes patrimoniais e mais." />
     <meta name="keywords" content="seguranca publica, parana, criminalidade, violencia, dados abertos, dashboard" />
     <meta name="author" content="Seguranca Parana" />
+    <link rel="canonical" href="https://avnergomes.github.io/seguranca-parana/" />
     <meta property="og:title" content="Seguranca Parana - Dashboard de Seguranca Publica" />
     <meta property="og:description" content="Painel interativo de indicadores de seguranca publica do Parana" />
     <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://avnergomes.github.io/seguranca-parana/" />
+    <meta property="og:image" content="https://avnergomes.github.io/seguranca-parana/og-image.png" />
     <meta property="og:locale" content="pt_BR" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Seguranca Parana - Dashboard de Seguranca Publica" />
+    <meta name="twitter:description" content="Painel interativo de indicadores de seguranca publica do Parana" />
+    <meta name="twitter:image" content="https://avnergomes.github.io/seguranca-parana/og-image.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
@@ -22,7 +29,7 @@
       "@type": "WebApplication",
       "name": "Seguranca Parana",
       "description": "Dashboard de indicadores de seguranca publica do estado do Parana",
-      "url": "https://seguranca-parana.github.io/seguranca-parana/",
+      "url": "https://avnergomes.github.io/seguranca-parana/",
       "applicationCategory": "DataVisualization",
       "operatingSystem": "Web",
       "author": {
@@ -63,10 +70,28 @@
     <script>
       (function() {
         var trackingUrl = '%VITE_TRACKING_URL%';
-        if (trackingUrl && !trackingUrl.includes('VITE_TRACKING_URL')) {
-          var img = new Image();
-          img.src = trackingUrl + '?p=' + encodeURIComponent(location.pathname) + '&t=' + Date.now();
-        }
+        if (!trackingUrl || trackingUrl.includes('VITE_TRACKING_URL')) return;
+        var key = 'dg_tracked_' + location.pathname;
+        if (sessionStorage.getItem(key)) return;
+        sessionStorage.setItem(key, '1');
+        try {
+          fetch(trackingUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'text/plain' },
+            body: JSON.stringify({
+              origin: location.origin,
+              page: location.pathname,
+              referrer: document.referrer || 'direto',
+              timestamp: new Date().toISOString(),
+              screenWidth: screen.width,
+              screenHeight: screen.height,
+              language: navigator.language,
+              isMobile: /Mobile|Android|iPhone/i.test(navigator.userAgent)
+            }),
+            keepalive: true
+          }).catch(function() {});
+        } catch(e) {}
       })();
     </script>
   </body>
