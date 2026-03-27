@@ -48,3 +48,4 @@ CLAUDE.md
 # Misc
 *.tgz
 .cache/
+dashboard/public/data/municipios.geojson

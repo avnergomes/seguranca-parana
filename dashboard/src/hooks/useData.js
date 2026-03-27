@@ -1,11 +1,20 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
+import { feature } from 'topojson-client'
 
 const BASE = import.meta.env.BASE_URL + 'data/'
+const TOPO_URL = 'https://cdn.jsdelivr.net/gh/datageoparana/datageoparana.github.io@main/assets/parana-municipalities.topojson'
 
 async function fetchJson(path) {
   const res = await fetch(BASE + path)
   if (!res.ok) throw new Error(`Falha ao carregar ${path}: ${res.status}`)
   return res.json()
+}
+
+async function fetchTopo() {
+  const res = await fetch(TOPO_URL)
+  if (!res.ok) throw new Error(`Falha ao carregar TopoJSON: ${res.status}`)
+  const topo = await res.json()
+  return feature(topo, topo.objects.municipalities)
 }
 
 export function useData() {
@@ -33,7 +42,7 @@ export function useData() {
           fetchJson('drogas.json'),
           fetchJson('serie_historica.json'),
           fetchJson('atlas_violencia.json'),
-          fetchJson('municipios.geojson'),
+          fetchTopo(),
           fetchJson('metadata.json'),
         ])
         if (cancelled) return
