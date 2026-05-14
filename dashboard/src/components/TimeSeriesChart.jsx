@@ -1,3 +1,4 @@
+// ATLAS-A11Y-HEX-SWEPT
 import React, { useMemo } from 'react'
 import {
   LineChart,
@@ -14,8 +15,8 @@ import { formatNumber } from '../utils/format'
 const COLOR_PALETTE = [
   '#ea580c', '#f97316', '#fb923c',
   '#14b8a6', '#0d9488', '#0f766e',
-  '#6366f1', '#4f46e5',
-  '#0ea5e9', '#f59e0b',
+  '#7a4e88', '#4f46e5',
+  '#3d729c', '#c89b3c',
 ]
 
 function TimeSeriesChart({ dados, titulo, xKey = 'ano', className = '' }) {

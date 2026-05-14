@@ -1,3 +1,4 @@
+// ATLAS-A11Y-HEX-SWEPT
 import React, { useMemo } from 'react'
 import {
   BarChart as RechartsBarChart,
@@ -13,8 +14,8 @@ import { formatNumber } from '../utils/format'
 
 const COLOR_PALETTE = [
   '#ea580c', '#f97316', '#fb923c', '#fdba74',
-  '#14b8a6', '#0d9488', '#6366f1', '#4f46e5',
-  '#0ea5e9', '#f59e0b',
+  '#14b8a6', '#0d9488', '#7a4e88', '#4f46e5',
+  '#3d729c', '#c89b3c',
 ]
 
 function BarChart({ dados, titulo, topN = 10, horizontal = false, valueKey = 'ocorrencias', labelKey = 'municipio', className = '' }) {

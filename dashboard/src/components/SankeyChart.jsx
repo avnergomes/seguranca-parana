@@ -2,12 +2,8 @@ import React, { useRef, useEffect, useMemo } from 'react'
 import * as d3 from 'd3'
 import { formatNumber } from '../utils/format'
 
-const COLORS = [
-  '#ea580c', '#f97316', '#fb923c',
-  '#14b8a6', '#0d9488', '#6366f1',
-  '#0ea5e9', '#f59e0b', '#ef4444',
-  '#8b5cf6', '#4f46e5', '#fdba74',
-]
+// ATLAS-PALETTE-V1 — Okabe-Ito daltonic-safe categorical
+const COLORS = ['#0072B2','#D55E00','#009E73','#E69F00','#CC79A7','#56B4E9','#F0E442','#2a2419']
 
 function SankeyChart({ dados, titulo, className = '' }) {
   const svgRef = useRef(null)
