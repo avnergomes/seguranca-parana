@@ -580,6 +580,10 @@ def main(argv: list[str] | None = None) -> None:
         for r in summary.results:
             if r.status == "fail":
                 logger.error("  - [%s] %s", r.source, r.file)
+        # Falhar o job: antes o pipeline saia com exit 0 mesmo com falhas
+        # e os dados ficavam congelados sem ninguem perceber.
+        logger.info("=== Done (with failures) ===")
+        sys.exit(1)
 
     logger.info("=== Done ===")
 

@@ -48,7 +48,7 @@ jobs:
       - name: Check for changes
         id: changes
         run: |
-          git diff --quiet && echo "changed=false" >> "$GITHUB_OUTPUT" || echo "changed=true" >> "$GITHUB_OUTPUT"
+          if [ -z "$(git status --porcelain data/ dashboard/public/data/)" ]; then echo "changed=false" >> "$GITHUB_OUTPUT"; else echo "changed=true" >> "$GITHUB_OUTPUT"; fi
 
       - name: Commit and push
         if: steps.changes.outputs.changed == 'true'

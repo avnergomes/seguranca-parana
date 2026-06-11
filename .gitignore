@@ -49,3 +49,6 @@ CLAUDE.md
 *.tgz
 .cache/
 dashboard/public/data/municipios.geojson
+
+# Artefatos locais do understand-anything
+.understand-anything/

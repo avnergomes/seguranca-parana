@@ -45,7 +45,7 @@ function KpiCard({ titulo, valor, anterior, icon: Icon, colorBg, colorIcon, colo
   const pct = pctChange(valor, anterior)
   const isUp = pct !== null && pct > 2
   const isDown = pct !== null && pct < -2
-  const badgeColor = isUp ? 'text-danger-600 bg-danger-50' : isDown ? 'text-emerald-600 bg-emerald-50' : 'text-dark-400 bg-neutral-100'
+  const badgeColor = isUp ? 'text-danger-600 bg-danger-50' : isDown ? 'text-sky-700 bg-sky-50' : 'text-dark-400 bg-neutral-100'
   return (
     <div className="stat-card group">
       <div className={`absolute top-0 left-0 w-1 md:w-1.5 h-full bg-gradient-to-b ${colorBar} rounded-l-2xl`} />
@@ -183,10 +183,10 @@ function App() {
     .map(m => ({ name: geoLookup[m.cod_ibge]?.municipio || m.municipio, value: m.vitimas }))
 
   const tabs = [
-    { id: 'visao-geral', label: 'Visao Geral', icon: BarChart3 },
-    { id: 'violencia-letal', label: 'Violencia Letal', icon: Crosshair },
+    { id: 'visao-geral', label: 'Visão Geral', icon: BarChart3 },
+    { id: 'violencia-letal', label: 'Violência Letal', icon: Crosshair },
     { id: 'crimes-patrimoniais', label: 'Patrimoniais', icon: Car },
-    { id: 'serie-historica', label: 'Serie Historica', icon: Activity },
+    { id: 'serie-historica', label: 'Série Histórica', icon: Activity },
     { id: 'perfil-municipal', label: 'Perfil Municipal', icon: Map },
   ]
 
@@ -204,8 +204,8 @@ function App() {
                 <Shield className="w-6 h-6 md:w-8 md:h-8 text-alert-300" />
               </div>
               <div>
-                <h1 className="text-xl md:text-2xl lg:text-3xl font-display font-bold tracking-tight">Seguranca Parana</h1>
-                <p className="text-alert-200 text-xs md:text-sm font-medium">Inteligencia Territorial de Seguranca Publica</p>
+                <h1 className="text-xl md:text-2xl lg:text-3xl font-display font-bold tracking-tight">Segurança Paraná</h1>
+                <p className="text-alert-200 text-xs md:text-sm font-medium">Inteligência Territorial de Segurança Pública</p>
               </div>
             </div>
             <div className="flex flex-wrap gap-2 md:gap-4">
@@ -280,12 +280,15 @@ function App() {
 
         {/* ── KPIs (filtered) ── */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 md:gap-4">
-          <KpiCard titulo="Vitimas Totais" valor={crimAtual?.vitimas} anterior={crimPrev?.vitimas} icon={Users} colorBg="bg-alert-50" colorIcon="text-alert-600" colorBar="from-alert-500 to-alert-600" />
-          <KpiCard titulo="Homicidios" valor={sumKeys(vlAtual, 'homic')} anterior={sumKeys(vlPrev, 'homic')} icon={Crosshair} colorBg="bg-danger-50" colorIcon="text-danger-600" colorBar="from-danger-500 to-danger-600" />
-          <KpiCard titulo="Tentativas" valor={sumKeys(vlAtual, 'tentativa')} anterior={sumKeys(vlPrev, 'tentativa')} icon={Target} colorBg="bg-amber-50" colorIcon="text-amber-600" colorBar="from-amber-500 to-amber-600" />
-          <KpiCard titulo="Roubos Veic." valor={sumKeys(patAtual, 'roubo de ve')} anterior={sumKeys(patPrev, 'roubo de ve')} icon={Car} colorBg="bg-secondary-50" colorIcon="text-secondary-600" colorBar="from-secondary-500 to-secondary-600" />
-          <KpiCard titulo="Furtos Veic." valor={sumKeys(patAtual, 'furto')} anterior={sumKeys(patPrev, 'furto')} icon={Truck} colorBg="bg-water-50" colorIcon="text-water-600" colorBar="from-water-500 to-water-600" />
-          <KpiCard titulo="Latrocinios" valor={sumKeys(vlAtual, 'latroc', 'morte')} anterior={sumKeys(vlPrev, 'latroc', 'morte')} icon={Skull} colorBg="bg-danger-50" colorIcon="text-danger-700" colorBar="from-danger-600 to-danger-700" />
+          {/* KPIs por chave exata: matching por substring somava 'Tentativa de
+              homicídio' em Homicídios e 'Lesão corporal seguida de morte' em
+              Latrocínios. */}
+          <KpiCard titulo="Vítimas Totais" valor={crimAtual?.vitimas} anterior={crimPrev?.vitimas} icon={Users} colorBg="bg-alert-50" colorIcon="text-alert-600" colorBar="from-alert-500 to-alert-600" />
+          <KpiCard titulo="Homicídios" valor={vlAtual?.['Homicídio doloso'] || 0} anterior={vlPrev?.['Homicídio doloso'] || 0} icon={Crosshair} colorBg="bg-danger-50" colorIcon="text-danger-600" colorBar="from-danger-500 to-danger-600" />
+          <KpiCard titulo="Tentativas" valor={vlAtual?.['Tentativa de homicídio'] || 0} anterior={vlPrev?.['Tentativa de homicídio'] || 0} icon={Target} colorBg="bg-amber-50" colorIcon="text-amber-600" colorBar="from-amber-500 to-amber-600" />
+          <KpiCard titulo="Roubos Veic." valor={patAtual?.['Roubo de veículo'] || 0} anterior={patPrev?.['Roubo de veículo'] || 0} icon={Car} colorBg="bg-secondary-50" colorIcon="text-secondary-600" colorBar="from-secondary-500 to-secondary-600" />
+          <KpiCard titulo="Furtos Veic." valor={patAtual?.['Furto de veículo'] || 0} anterior={patPrev?.['Furto de veículo'] || 0} icon={Truck} colorBg="bg-water-50" colorIcon="text-water-600" colorBar="from-water-500 to-water-600" />
+          <KpiCard titulo="Latrocínios" valor={vlAtual?.['Roubo seguido de morte (latrocínio)'] || 0} anterior={vlPrev?.['Roubo seguido de morte (latrocínio)'] || 0} icon={Skull} colorBg="bg-danger-50" colorIcon="text-danger-700" colorBar="from-danger-600 to-danger-700" />
         </div>
 
         {/* ── Tabs ── */}

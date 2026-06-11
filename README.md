@@ -4,7 +4,7 @@ Dashboard de inteligencia territorial para seguranca publica do Parana.
 
 Painel interativo que reune indicadores criminais, socioeconomicos e demograficos dos 399 municipios paranaenses, permitindo analise comparativa por municipio, regiao e serie historica.
 
-> **10o painel** do ecossistema [DataGeo Parana](https://github.com/datageo-parana) -- plataforma de paineis tematicos georreferenciados sobre o estado do Parana.
+> **10o painel** do ecossistema [DataGeo Parana](https://github.com/datageoparana) -- plataforma de paineis tematicos georreferenciados sobre o estado do Parana.
 
 ---
 

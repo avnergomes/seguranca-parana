@@ -10,6 +10,33 @@ export default {
   theme: {
     extend: {
       colors: {
+        /* Aliases legados: o tema atlas removeu as escalas 'alert' e
+           'danger', mas o App usa ~100 classes delas (aba ativa, botão de
+           erro e KPIs ficavam invisíveis). Mapeadas para clay/tijolo. */
+        alert: {
+          50:  '#f6e2d3',
+          100: '#ecc1a4',
+          200: '#e0996d',
+          300: '#d4784a',
+          400: '#ca6238',
+          500: '#c0532e',
+          600: '#a8482c',
+          700: '#893824',
+          800: '#5b291f',
+          900: '#43201a',
+        },
+        danger: {
+          50:  '#f9e3df',
+          100: '#f2c4bd',
+          200: '#e39a8f',
+          300: '#d06f61',
+          400: '#c14b3b',
+          500: '#b3261e',
+          600: '#9a201a',
+          700: '#7f1a15',
+          800: '#641410',
+          900: '#4a0f0c',
+        },
         /* primary = forest (was teal). Anchor #2d3f1f. */
         primary: {
           50:  '#f4f6ed',
