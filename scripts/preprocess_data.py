@@ -14,7 +14,6 @@ Output files (all in data/processed/):
   - atlas_violencia.json  (long-term Atlas da Violência series)
   - geo_map.json          (municipality -> mesoregion via IBGE API)
   - metadata.json         (dataset metadata)
-  - municipios.geojson    (copy of mun_PR.json)
 """
 
 import json
@@ -767,16 +766,9 @@ def build_metadata(
     return meta
 
 
-def copy_geojson() -> None:
-    """Copy mun_PR.json -> municipios.geojson"""
-    src = BASE_DIR / "mun_PR.json"
-    dest = OUT_DIR / "municipios.geojson"
-    if not src.exists():
-        logger.warning("%s not found - skipping geojson copy", src)
-        return
-    shutil.copy2(src, dest)
-    size_kb = dest.stat().st_size / 1024
-    logger.info("[OK] municipios.geojson  (%.1f KB, copied from mun_PR.json)", size_kb)
+# copy_geojson() removido: municipios.geojson (47 MB) era copiado para o
+# build do Pages sem nenhum consumidor — o dashboard usa o TopoJSON de
+# 4,4 MB servido pelo hub via CDN (useData.js TOPO_URL).
 
 
 # ---------------------------------------------------------------------------
@@ -822,7 +814,6 @@ def main() -> None:
     _save_json(build_atlas_violencia(), "atlas_violencia.json")
     _save_json(build_geo_map(), "geo_map.json")
     _save_json(build_metadata(df_mun, df_uf, pop_fonte), "metadata.json")
-    copy_geojson()
 
     logger.info("=== Preprocessing complete ===")
 

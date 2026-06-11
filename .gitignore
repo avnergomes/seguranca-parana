@@ -52,3 +52,8 @@ dashboard/public/data/municipios.geojson
 
 # Artefatos locais do understand-anything
 .understand-anything/
+
+# GeoJSONs gigantes nao usados pelo dashboard (usa TopoJSON do hub via CDN)
+mun_PR.json
+data/processed/municipios.geojson
+dashboard/public/data/municipios.geojson
