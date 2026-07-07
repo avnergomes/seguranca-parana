@@ -41,7 +41,7 @@ function QuickStat({ icon: Icon, label, sublabel }) {
 }
 
 /* ── KpiCard ──────────────────────────────────────────────── */
-function KpiCard({ titulo, valor, anterior, icon: Icon, colorBg, colorIcon, colorBar }) {
+function KpiCard({ titulo, valor, anterior, icon: Icon, colorBg, colorIcon, colorBar, escopo }) {
   const pct = pctChange(valor, anterior)
   const isUp = pct !== null && pct > 2
   const isDown = pct !== null && pct < -2
@@ -52,6 +52,12 @@ function KpiCard({ titulo, valor, anterior, icon: Icon, colorBg, colorIcon, colo
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <span className="kpi-label text-[10px] md:text-xs">{titulo}</span>
+          {escopo && (
+            <span
+              className="ml-1 inline-block align-middle px-1.5 py-0.5 rounded-full bg-neutral-100 text-dark-500 text-[9px] font-medium uppercase tracking-wide whitespace-nowrap"
+              title="Indicador disponível apenas no nível estadual"
+            >{escopo}</span>
+          )}
           <div className="kpi-value text-xl md:text-2xl lg:text-3xl mt-1">{valor != null ? formatNumber(valor) : '-'}</div>
         </div>
         <div className="flex flex-col items-end gap-2 flex-shrink-0">
@@ -122,7 +128,7 @@ function HorizontalBarRanking({ data, titulo, subtitulo }) {
 
 function App() {
   const {
-    loading, erro, serieHistorica, geoData, geoLookup, metadata,
+    loading, erro, serieHistorica, geoStatus, retryTopo, geoLookup, metadata,
     filtros, setFiltros, anos, mesorregioes, regionais, municipios, dadosFiltrados,
   } = useData()
 
@@ -135,6 +141,7 @@ function App() {
       <div className="min-h-screen bg-neutral-50">
         <div className="bg-gradient-to-br from-dark-900 via-dark-800 to-alert-900 h-48" />
         <div className="max-w-7xl mx-auto px-4 -mt-8 space-y-6">
+          <p className="text-center text-sm text-dark-400">Carregando dados do painel (cerca de 4 MB)...</p>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
             {[...Array(6)].map((_, i) => <div key={i} className="bg-white rounded-2xl shadow-soft p-6 h-28 animate-pulse" />)}
           </div>
@@ -166,6 +173,11 @@ function App() {
   const pat = dadosFiltrados?.patrimonio || {}
   const vitSexo = dadosFiltrados?.vitimasSexo || {}
   const anoAtual = filtros.anoFim || anos[anos.length - 1]
+
+  // Filtro geografico ativo: os KPIs de nivel estadual (SINESP UF) nao
+  // acompanham o recorte e recebem o selo 'PR (estado)'.
+  const geoFiltroAtivo = filtros.mesorregiao !== 'todas' || filtros.regional !== 'todas' || filtros.municipio !== 'todos'
+  const escopoUF = geoFiltroAtivo ? 'PR (estado)' : null
 
   const crimAtual = getByAno(crim.estado, anoAtual)
   const crimPrev = getByAno(crim.estado, anoAtual - 1)
@@ -269,7 +281,16 @@ function App() {
               </select>
             </div>
           </div>
-          {(filtros.mesorregiao !== 'todas' || filtros.regional !== 'todas' || filtros.municipio !== 'todos') && (
+          {geoStatus === 'carregando' && (
+            <p className="mt-3 text-xs text-dark-400">Carregando malha municipal...</p>
+          )}
+          {geoStatus === 'erro' && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+              <span className="flex-1 min-w-[200px]">Não foi possível carregar a malha municipal (fonte externa). Filtros geográficos em modo limitado.</span>
+              <button type="button" onClick={retryTopo} className="px-2.5 py-1 rounded-md border border-amber-300 font-medium hover:bg-amber-100 transition-colors">Tentar novamente</button>
+            </div>
+          )}
+          {geoFiltroAtivo && (
             <div className="flex flex-wrap gap-2 mt-3 pt-3 border-t border-neutral-100">
               {filtros.mesorregiao !== 'todas' && <span className="active-filter-badge">Meso: {filtros.mesorregiao}<button onClick={() => setFiltros({ mesorregiao: 'todas' })}><X className="w-3 h-3 ml-1" /></button></span>}
               {filtros.regional !== 'todas' && <span className="active-filter-badge">Regional: {filtros.regional}<button onClick={() => setFiltros({ regional: 'todas' })}><X className="w-3 h-3 ml-1" /></button></span>}
@@ -284,11 +305,11 @@ function App() {
               homicídio' em Homicídios e 'Lesão corporal seguida de morte' em
               Latrocínios. */}
           <KpiCard titulo="Vítimas Totais" valor={crimAtual?.vitimas} anterior={crimPrev?.vitimas} icon={Users} colorBg="bg-alert-50" colorIcon="text-alert-600" colorBar="from-alert-500 to-alert-600" />
-          <KpiCard titulo="Homicídios" valor={vlAtual?.['Homicídio doloso'] || 0} anterior={vlPrev?.['Homicídio doloso'] || 0} icon={Crosshair} colorBg="bg-danger-50" colorIcon="text-danger-600" colorBar="from-danger-500 to-danger-600" />
-          <KpiCard titulo="Tentativas" valor={vlAtual?.['Tentativa de homicídio'] || 0} anterior={vlPrev?.['Tentativa de homicídio'] || 0} icon={Target} colorBg="bg-amber-50" colorIcon="text-amber-600" colorBar="from-amber-500 to-amber-600" />
-          <KpiCard titulo="Roubos Veic." valor={patAtual?.['Roubo de veículo'] || 0} anterior={patPrev?.['Roubo de veículo'] || 0} icon={Car} colorBg="bg-secondary-50" colorIcon="text-secondary-600" colorBar="from-secondary-500 to-secondary-600" />
-          <KpiCard titulo="Furtos Veic." valor={patAtual?.['Furto de veículo'] || 0} anterior={patPrev?.['Furto de veículo'] || 0} icon={Truck} colorBg="bg-water-50" colorIcon="text-water-600" colorBar="from-water-500 to-water-600" />
-          <KpiCard titulo="Latrocínios" valor={vlAtual?.['Roubo seguido de morte (latrocínio)'] || 0} anterior={vlPrev?.['Roubo seguido de morte (latrocínio)'] || 0} icon={Skull} colorBg="bg-danger-50" colorIcon="text-danger-700" colorBar="from-danger-600 to-danger-700" />
+          <KpiCard titulo="Homicídios" escopo={escopoUF} valor={vlAtual?.['Homicídio doloso'] || 0} anterior={vlPrev?.['Homicídio doloso'] || 0} icon={Crosshair} colorBg="bg-danger-50" colorIcon="text-danger-600" colorBar="from-danger-500 to-danger-600" />
+          <KpiCard titulo="Tentativas" escopo={escopoUF} valor={vlAtual?.['Tentativa de homicídio'] || 0} anterior={vlPrev?.['Tentativa de homicídio'] || 0} icon={Target} colorBg="bg-amber-50" colorIcon="text-amber-600" colorBar="from-amber-500 to-amber-600" />
+          <KpiCard titulo="Roubos Veic." escopo={escopoUF} valor={patAtual?.['Roubo de veículo'] || 0} anterior={patPrev?.['Roubo de veículo'] || 0} icon={Car} colorBg="bg-secondary-50" colorIcon="text-secondary-600" colorBar="from-secondary-500 to-secondary-600" />
+          <KpiCard titulo="Furtos Veic." escopo={escopoUF} valor={patAtual?.['Furto de veículo'] || 0} anterior={patPrev?.['Furto de veículo'] || 0} icon={Truck} colorBg="bg-water-50" colorIcon="text-water-600" colorBar="from-water-500 to-water-600" />
+          <KpiCard titulo="Latrocínios" escopo={escopoUF} valor={vlAtual?.['Roubo seguido de morte (latrocínio)'] || 0} anterior={vlPrev?.['Roubo seguido de morte (latrocínio)'] || 0} icon={Skull} colorBg="bg-danger-50" colorIcon="text-danger-700" colorBar="from-danger-600 to-danger-700" />
         </div>
 
         {/* ── Tabs ── */}
@@ -297,6 +318,7 @@ function App() {
             const isActive = activeTab === t.id
             return (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
+                aria-label={t.label} title={t.label}
                 className={`flex items-center gap-1.5 md:gap-2 px-3 md:px-5 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-medium transition-all flex-shrink-0 ${
                   isActive ? 'bg-gradient-to-r from-alert-500 to-alert-600 text-white shadow-lg shadow-alert-500/25 scale-[1.02]' : 'text-neutral-600 hover:text-alert-700 hover:bg-white/80'
                 }`}>
@@ -314,7 +336,7 @@ function App() {
           {activeTab === 'visao-geral' && (<>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
               <MultiLineChart data={crim.estado} titulo="Vitimas por Ano" subtitulo="Total filtrado por geografia selecionada" />
-              <HorizontalBarRanking data={topMunicipios} titulo={`Top Municipios (${anoAtual})`} subtitulo="Ranking de vitimas no periodo filtrado" />
+              <HorizontalBarRanking data={topMunicipios} titulo={<>Top Municipios {`(${anoAtual})`}</>} subtitulo="Ranking de vitimas no periodo filtrado" />
             </div>
 
             {vl.estado?.length > 0 && (
@@ -334,14 +356,14 @@ function App() {
               <MultiLineChart data={vitSexo.estado} titulo="Vitimas por Sexo — Serie Anual" subtitulo="Desagregacao por sexo (masculino, feminino, nao informado)" />
             )}
 
-            <HorizontalBarRanking data={topMunicipios} titulo={`Municipios com mais Vitimas (${anoAtual})`} subtitulo="Filtrado pela geografia selecionada" />
+            <HorizontalBarRanking data={topMunicipios} titulo={<>Municipios com mais Vitimas {`(${anoAtual})`}</>} subtitulo="Filtrado pela geografia selecionada" />
           </>)}
 
           {/* ── CRIMES PATRIMONIAIS ── */}
           {activeTab === 'crimes-patrimoniais' && (<>
             <MultiLineChart data={pat.estado} titulo="Crimes Patrimoniais — Serie Anual" subtitulo="Roubo/furto de veiculos, roubo de carga, roubo a inst. financeira" />
 
-            <HorizontalBarRanking data={topMunicipios} titulo={`Municipios com mais Vitimas (${anoAtual})`} subtitulo="Dados municipais de vitimas totais (SINESP)" />
+            <HorizontalBarRanking data={topMunicipios} titulo={<>Municipios com mais Vitimas {`(${anoAtual})`}</>} subtitulo="Dados municipais de vitimas totais (SINESP)" />
           </>)}
 
           {/* ── SERIE HISTORICA ── */}
@@ -379,9 +401,9 @@ function App() {
               return (<>
                 <div className="card p-6">
                   <h3 className="font-display font-bold text-xl text-dark-900">{munInfo?.municipio}</h3>
-                  <p className="text-sm text-dark-400">Regional {munInfo?.regional} — Mesorregiao {munInfo?.mesorregiao}</p>
+                  <p className="text-sm text-dark-400">{munInfo?.regional ? <>Regional {munInfo.regional}, </> : null}Mesorregião {munInfo?.mesorregiao}</p>
                 </div>
-                <MultiLineChart data={munSerie} titulo={`Vitimas por Ano — ${munInfo?.municipio}`} subtitulo="Dados municipais mensais agregados anualmente" />
+                <MultiLineChart data={munSerie} titulo={<>Vitimas por Ano {`(${munInfo?.municipio})`}</>} subtitulo="Dados municipais mensais agregados anualmente" />
               </>)
             })()}
 
@@ -389,7 +411,7 @@ function App() {
             <div className="chart-container">
               <div className="flex items-center justify-between mb-4">
                 <div>
-                  <h3 className="chart-title mb-0">Ranking Municipal ({anoAtual})</h3>
+                  <h3 className="chart-title mb-0">Ranking Municipal {`(${anoAtual})`}</h3>
                   <p className="text-xs text-dark-400">Vitimas totais — filtrado por geografia</p>
                 </div>
                 <div className="relative">
@@ -458,7 +480,12 @@ function App() {
             </div>
           </div>
           <div className="mt-6 pt-4 border-t border-alert-200 flex flex-col sm:flex-row items-center justify-between gap-2 text-[10px] text-dark-400">
-            <p>Dados sensiveis. Numeros sujeitos a atualizacao pelas fontes originais.</p>
+            <div className="flex flex-col sm:flex-row items-center gap-1 sm:gap-3">
+              <p>Dados sensiveis. Numeros sujeitos a atualizacao pelas fontes originais.</p>
+              {metadata?.gerado_em && (
+                <p>Dados atualizados em {String(metadata.gerado_em).slice(0, 10).split('-').reverse().join('/')}</p>
+              )}
+            </div>
             <div className="flex gap-2">
               <span className="px-2 py-0.5 bg-alert-100 text-alert-700 rounded-full">{anos.length} anos</span>
               <span className="px-2 py-0.5 bg-primary-100 text-primary-700 rounded-full">399 municipios</span>

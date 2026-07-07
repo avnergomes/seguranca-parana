@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { feature } from 'topojson-client'
 
 const BASE = import.meta.env.BASE_URL + 'data/'
@@ -22,6 +22,16 @@ export function useData() {
   const [loading, setLoading] = useState(true)
   const [erro, setErro] = useState(null)
 
+  // Malha municipal (topojson de CDN externo) fora do caminho critico:
+  // falha do CDN nao derruba o painel, os dados locais continuam servindo.
+  const [geo, setGeo] = useState(null)
+  const [geoStatus, setGeoStatus] = useState('carregando') // 'carregando' | 'ok' | 'erro'
+  const aliveRef = useRef(true)
+  useEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
+
   const [filtros, setFiltrosState] = useState({
     anoInicio: null,
     anoFim: null,
@@ -30,11 +40,33 @@ export function useData() {
     municipio: 'todos',
   })
 
+  const loadTopo = useCallback(async () => {
+    setGeoStatus('carregando')
+    try {
+      const g = await fetchTopo()
+      if (!aliveRef.current) return
+      setGeo(g)
+      setGeoStatus('ok')
+      // Selecoes feitas sobre as listas de fallback (malha IBGE local) podem
+      // nao existir na malha IDR; volta meso/regional ao padrao e preserva o
+      // municipio (o codigo IBGE e o mesmo nas duas fontes).
+      setFiltrosState(f => (
+        f.mesorregiao === 'todas' && f.regional === 'todas'
+          ? f
+          : { ...f, mesorregiao: 'todas', regional: 'todas' }
+      ))
+    } catch (e) {
+      if (aliveRef.current) setGeoStatus('erro')
+    }
+  }, [])
+
+  useEffect(() => { loadTopo() }, [loadTopo])
+
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
-        const [crim, vl, pat, vitSexo, drug, serie, atlas, geo, meta] = await Promise.all([
+        const [crim, vl, pat, vitSexo, drug, serie, atlas, geoMap, meta] = await Promise.all([
           fetchJson('criminalidade.json'),
           fetchJson('violencia_letal.json'),
           fetchJson('patrimonio.json'),
@@ -42,11 +74,11 @@ export function useData() {
           fetchJson('drogas.json'),
           fetchJson('serie_historica.json'),
           fetchJson('atlas_violencia.json'),
-          fetchTopo(),
+          fetchJson('geo_map.json'),
           fetchJson('metadata.json'),
         ])
         if (cancelled) return
-        setRaw({ crim, vl, pat, vitSexo, drug, serie, atlas, geo, meta })
+        setRaw({ crim, vl, pat, vitSexo, drug, serie, atlas, geoMap, meta })
         const anos = [...new Set(crim.map(r => r.ano))].sort((a, b) => a - b)
         if (anos.length > 0) {
           setFiltrosState(f => ({ ...f, anoInicio: anos[0], anoFim: anos[anos.length - 1] }))
@@ -61,16 +93,36 @@ export function useData() {
     return () => { cancelled = true }
   }, [])
 
-  // GeoJSON-derived lookup
+  // Atributos municipais unificados: topo (malha IDR) quando disponivel;
+  // fallback tabular local (geo_map.json, malha IBGE, sem regionais IDR)
+  // quando o CDN externo falha.
+  const geoAttrs = useMemo(() => {
+    if (geo?.features) {
+      return geo.features.map(f => ({
+        cod: f.properties.CodIbge,
+        municipio: f.properties.Municipio,
+        mesorregiao: f.properties.MesoIdr,
+        regional: f.properties.RegIdr,
+      }))
+    }
+    if (geoStatus === 'erro' && Array.isArray(raw?.geoMap)) {
+      return raw.geoMap.map(m => ({
+        cod: m.cod_ibge,
+        municipio: m.municipio,
+        mesorregiao: m.mesorregiao,
+        regional: null,
+      }))
+    }
+    return []
+  }, [geo, geoStatus, raw])
+
   const geoLookup = useMemo(() => {
-    if (!raw?.geo?.features) return {}
     const m = {}
-    for (const f of raw.geo.features) {
-      const p = f.properties
-      m[p.CodIbge] = { cod_ibge: p.CodIbge, municipio: p.Municipio, mesorregiao: p.MesoIdr, regional: p.RegIdr }
+    for (const a of geoAttrs) {
+      m[a.cod] = { cod_ibge: a.cod, municipio: a.municipio, mesorregiao: a.mesorregiao, regional: a.regional }
     }
     return m
-  }, [raw])
+  }, [geoAttrs])
 
   const anos = useMemo(() => {
     if (!raw) return []
@@ -78,35 +130,32 @@ export function useData() {
   }, [raw])
 
   const mesorregioes = useMemo(() => {
-    if (!raw?.geo?.features) return []
-    return [...new Set(raw.geo.features.map(f => f.properties.MesoIdr))].sort()
-  }, [raw])
+    return [...new Set(geoAttrs.map(a => a.mesorregiao).filter(Boolean))].sort()
+  }, [geoAttrs])
 
   const regionais = useMemo(() => {
-    if (!raw?.geo?.features) return []
-    let feats = raw.geo.features
-    if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
-    return [...new Set(feats.map(f => f.properties.RegIdr))].sort()
-  }, [raw, filtros.mesorregiao])
+    let feats = geoAttrs
+    if (filtros.mesorregiao !== 'todas') feats = feats.filter(a => a.mesorregiao === filtros.mesorregiao)
+    return [...new Set(feats.map(a => a.regional).filter(Boolean))].sort()
+  }, [geoAttrs, filtros.mesorregiao])
 
   const municipios = useMemo(() => {
-    if (!raw?.geo?.features) return []
-    let feats = raw.geo.features
-    if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
-    if (filtros.regional !== 'todas') feats = feats.filter(f => f.properties.RegIdr === filtros.regional)
-    return feats.map(f => ({ cod: f.properties.CodIbge, nome: f.properties.Municipio })).sort((a, b) => a.nome.localeCompare(b.nome))
-  }, [raw, filtros.mesorregiao, filtros.regional])
+    let feats = geoAttrs
+    if (filtros.mesorregiao !== 'todas') feats = feats.filter(a => a.mesorregiao === filtros.mesorregiao)
+    if (filtros.regional !== 'todas') feats = feats.filter(a => a.regional === filtros.regional)
+    return feats.map(a => ({ cod: a.cod, nome: a.municipio })).sort((x, y) => x.nome.localeCompare(y.nome))
+  }, [geoAttrs, filtros.mesorregiao, filtros.regional])
 
   // Filtered cod set (null = no geographic filter)
   const filteredCods = useMemo(() => {
-    if (!raw?.geo?.features) return null
+    if (geoAttrs.length === 0) return null
     if (filtros.mesorregiao === 'todas' && filtros.regional === 'todas' && filtros.municipio === 'todos') return null
-    let feats = raw.geo.features
-    if (filtros.mesorregiao !== 'todas') feats = feats.filter(f => f.properties.MesoIdr === filtros.mesorregiao)
-    if (filtros.regional !== 'todas') feats = feats.filter(f => f.properties.RegIdr === filtros.regional)
-    if (filtros.municipio !== 'todos') feats = feats.filter(f => f.properties.CodIbge === filtros.municipio)
-    return new Set(feats.map(f => Number(f.properties.CodIbge)))
-  }, [raw, filtros])
+    let feats = geoAttrs
+    if (filtros.mesorregiao !== 'todas') feats = feats.filter(a => a.mesorregiao === filtros.mesorregiao)
+    if (filtros.regional !== 'todas') feats = feats.filter(a => a.regional === filtros.regional)
+    if (filtros.municipio !== 'todos') feats = feats.filter(a => String(a.cod) === String(filtros.municipio))
+    return new Set(feats.map(a => Number(a.cod)))
+  }, [geoAttrs, filtros])
 
   // Year filter helper
   const inYear = useCallback((ano) => {
@@ -197,7 +246,9 @@ export function useData() {
     loading, erro,
     serieHistorica: raw?.serie || null,
     atlasViolencia: raw?.atlas || null,
-    geoData: raw?.geo || null,
+    geoData: geo,
+    geoStatus,
+    retryTopo: loadTopo,
     geoLookup,
     metadata: raw?.meta || null,
     filtros, setFiltros,

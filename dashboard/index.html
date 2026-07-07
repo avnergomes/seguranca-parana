@@ -39,6 +39,21 @@
           bar.appendChild(a);
           bar.appendChild(btn);
           document.body.appendChild(bar);
+          // Empilha o convite acima do banner LGPD quando ele estiver visivel,
+          // para nenhum dos dois cobrir o outro (o botao Entendi fica clicavel).
+          // Recalcula quando o LGPD fecha (observer) e em resize/load.
+          function reposition() {
+            var lgpd = document.getElementById('lgpd-banner');
+            var h = (lgpd && lgpd.style.display !== 'none') ? lgpd.offsetHeight : 0;
+            bar.style.bottom = h + 'px';
+          }
+          reposition();
+          window.addEventListener('resize', reposition);
+          window.addEventListener('load', reposition);
+          var lgpd = document.getElementById('lgpd-banner');
+          if (lgpd && typeof MutationObserver === 'function') {
+            new MutationObserver(reposition).observe(lgpd, { attributes: true, attributeFilter: ['style'] });
+          }
         }
         if (document.readyState === 'loading') {
           document.addEventListener('DOMContentLoaded', mount);
@@ -50,20 +65,21 @@
 
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Segurança Paraná - Dashboard de Seguranca Publica</title>
-    <meta name="description" content="Painel interativo de indicadores de seguranca publica do estado do Parana. Dados abertos de criminalidade, violencia letal, crimes patrimoniais e mais." />
-    <meta name="keywords" content="seguranca publica, parana, criminalidade, violencia, dados abertos, dashboard" />
-    <meta name="author" content="Segurança Paraná" />
+    <title>Segurança Paraná - Dashboard de Segurança Pública | DataGeo Paraná</title>
+    <meta name="description" content="Painel interativo de indicadores de segurança pública do estado do Paraná. Dados abertos de criminalidade, violência letal, crimes patrimoniais e mais." />
+    <meta name="keywords" content="segurança pública, paraná, criminalidade, violência, dados abertos, dashboard" />
+    <meta name="author" content="Avner Gomes" />
+    <meta name="theme-color" content="#14110c" />
     <link rel="canonical" href="https://avnergomes.github.io/seguranca-parana/" />
-    <meta property="og:title" content="Segurança Paraná - Dashboard de Seguranca Publica" />
-    <meta property="og:description" content="Painel interativo de indicadores de seguranca publica do Parana" />
+    <meta property="og:title" content="Segurança Paraná - Dashboard de Segurança Pública" />
+    <meta property="og:description" content="Painel interativo de indicadores de segurança pública do Paraná" />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://avnergomes.github.io/seguranca-parana/" />
     <meta property="og:image" content="https://avnergomes.github.io/seguranca-parana/og-image.png" />
     <meta property="og:locale" content="pt_BR" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="Segurança Paraná - Dashboard de Seguranca Publica" />
-    <meta name="twitter:description" content="Painel interativo de indicadores de seguranca publica do Parana" />
+    <meta name="twitter:title" content="Segurança Paraná - Dashboard de Segurança Pública" />
+    <meta name="twitter:description" content="Painel interativo de indicadores de segurança pública do Paraná" />
     <meta name="twitter:image" content="https://avnergomes.github.io/seguranca-parana/og-image.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -154,33 +170,95 @@
         if (b) b.style.display = 'block';
       }
     </script>
-<!-- Analytics -->
+    <!-- Analytics Tracking Script - Dados anonimizados (Art. 12 LGPD) -->
     <script>
-      (function() {
-        var trackingUrl = '%VITE_TRACKING_URL%';
-        if (!trackingUrl || trackingUrl.includes('VITE_TRACKING_URL')) return;
-        var key = 'dg_tracked_' + location.pathname;
-        if (sessionStorage.getItem(key)) return;
-        sessionStorage.setItem(key, '1');
+    (function() {
+      var TRACKING_URL = '%VITE_TRACKING_URL%';
+      if (!TRACKING_URL || TRACKING_URL.indexOf('VITE_TRACKING_URL') !== -1) {
+        console.warn('[Tracking] URL not configured - tracking disabled');
+        return;
+      }
+
+      function getDeviceType() {
+        var ua = navigator.userAgent;
+        if (/tablet|ipad|playbook|silk/i.test(ua)) return 'Tablet';
+        if (/Mobile|Android|iPhone|iPod|webOS|BlackBerry|Opera Mini|IEMobile/i.test(ua)) return 'Mobile';
+        return 'Desktop';
+      }
+
+      function getConnectionType() {
+        if (navigator.connection) {
+          return navigator.connection.effectiveType || 'unknown';
+        }
+        return 'unknown';
+      }
+
+      function getUTMParams() {
+        var params = new URLSearchParams(window.location.search);
+        return {
+          utmSource: params.get('utm_source') || '',
+          utmMedium: params.get('utm_medium') || '',
+          utmCampaign: params.get('utm_campaign') || '',
+          utmTerm: params.get('utm_term') || '',
+          utmContent: params.get('utm_content') || ''
+        };
+      }
+
+      function initTracking() {
         try {
-          fetch(trackingUrl, {
+          var loadTime = 0;
+          var navEntry = window.performance && window.performance.getEntriesByType ? window.performance.getEntriesByType('navigation')[0] : null;
+          if (navEntry) {
+            loadTime = Math.round(navEntry.loadEventEnd);
+          }
+
+          var utmParams = getUTMParams();
+
+          // Campos anonimizados - sem IP, cookies ou fingerprint (Art. 12 LGPD)
+          var data = {
+            origin: window.location.origin,
+            timestamp: new Date().toISOString(),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+            timezoneOffset: new Date().getTimezoneOffset(),
+            page: window.location.href,
+            pathname: window.location.pathname,
+            referrer: document.referrer || '',
+            pageTitle: document.title,
+            language: navigator.language,
+            deviceType: getDeviceType(),
+            screenOrientation: screen.orientation ? screen.orientation.type : 'unknown',
+            connectionType: getConnectionType(),
+            loadTime: loadTime > 0 ? loadTime : '',
+            utmSource: utmParams.utmSource,
+            utmMedium: utmParams.utmMedium,
+            utmCampaign: utmParams.utmCampaign,
+            utmTerm: utmParams.utmTerm,
+            utmContent: utmParams.utmContent,
+            prefersColorScheme: window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
+          };
+
+          fetch(TRACKING_URL, {
             method: 'POST',
             mode: 'no-cors',
             headers: { 'Content-Type': 'text/plain' },
-            body: JSON.stringify({
-              origin: location.origin,
-              page: location.pathname,
-              referrer: document.referrer || 'direto',
-              timestamp: new Date().toISOString(),
-              screenWidth: screen.width,
-              screenHeight: screen.height,
-              language: navigator.language,
-              isMobile: /Mobile|Android|iPhone/i.test(navigator.userAgent)
-            }),
-            keepalive: true
-          }).catch(function() {});
-        } catch(e) {}
-      })();
+            body: JSON.stringify(data)
+          }).then(function() {
+            console.log('[Tracking] Data sent (anonymous)');
+          }).catch(function(err) {
+            console.warn('[Tracking] Error:', err);
+          });
+        } catch (e) {
+          console.warn('[Tracking] Exception:', e);
+        }
+      }
+
+      // Tracking dispara sempre - dados anonimizados nao exigem consentimento
+      if (document.readyState === 'complete') {
+        setTimeout(initTracking, 100);
+      } else {
+        window.addEventListener('load', function() { setTimeout(initTracking, 100); });
+      }
+    })();
     </script>
   </body>
 </html>
