@@ -2,7 +2,10 @@ import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { feature } from 'topojson-client'
 
 const BASE = import.meta.env.BASE_URL + 'data/'
-const TOPO_URL = 'https://cdn.jsdelivr.net/gh/datageoparana/datageoparana.github.io@main/assets/parana-municipalities.topojson'
+// Malha reduzida self-hosted (749 KB) como primaria; CDN externo (4,4 MB) como
+// fallback. Mesmas propriedades e object key 'municipalities' nas duas fontes.
+const TOPO_URL = 'https://datageoparana.github.io/assets/parana-municipalities.min.topojson'
+const TOPO_URL_FALLBACK = 'https://cdn.jsdelivr.net/gh/datageoparana/datageoparana.github.io@main/assets/parana-municipalities.topojson'
 
 async function fetchJson(path) {
   const res = await fetch(BASE + path)
@@ -10,11 +13,22 @@ async function fetchJson(path) {
   return res.json()
 }
 
-async function fetchTopo() {
-  const res = await fetch(TOPO_URL)
+async function fetchTopoFrom(url) {
+  const res = await fetch(url)
   if (!res.ok) throw new Error(`Falha ao carregar TopoJSON: ${res.status}`)
   const topo = await res.json()
   return feature(topo, topo.objects.municipalities)
+}
+
+// Tenta a malha primaria (self-hosted); em qualquer falha (rede ou res.ok false)
+// tenta o fallback (CDN externo) antes de propagar o erro. Usado em TODOS os
+// fetches do topojson (carga inicial e retry).
+async function fetchTopo() {
+  try {
+    return await fetchTopoFrom(TOPO_URL)
+  } catch {
+    return await fetchTopoFrom(TOPO_URL_FALLBACK)
+  }
 }
 
 export function useData() {
