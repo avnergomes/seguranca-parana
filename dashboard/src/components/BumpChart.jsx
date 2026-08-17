@@ -160,7 +160,9 @@ function BumpChart({ dados, titulo, topN = 10, className = '' }) {
   return (
     <div className={`card ${className}`} ref={containerRef}>
       {titulo && <h3 className="section-title">{titulo}</h3>}
-      <svg ref={svgRef} className="w-full" />
+      <div className="overflow-x-auto">
+        <svg ref={svgRef} className="w-full" />
+      </div>
     </div>
   )
 }

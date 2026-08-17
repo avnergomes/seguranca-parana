@@ -313,17 +313,17 @@ function App() {
         </div>
 
         {/* ── Tabs ── */}
-        <div className="flex gap-1.5 md:gap-2 p-1.5 md:p-2 bg-neutral-100/50 rounded-xl md:rounded-2xl overflow-x-auto scrollbar-thin">
+        <div className="flex gap-1 md:gap-2 p-1.5 md:p-2 bg-neutral-100/50 rounded-xl md:rounded-2xl overflow-x-auto scrollbar-thin">
           {tabs.map(t => {
             const isActive = activeTab === t.id
             return (
               <button key={t.id} onClick={() => setActiveTab(t.id)}
                 aria-label={t.label} title={t.label}
-                className={`flex items-center gap-1.5 md:gap-2 px-3 md:px-5 py-2 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-medium transition-all flex-shrink-0 ${
+                className={`flex items-center gap-1 md:gap-2 px-2 md:px-5 min-h-[44px] py-1 md:py-3 rounded-lg md:rounded-xl text-xs md:text-sm font-medium transition-all flex-shrink-0 ${
                   isActive ? 'bg-gradient-to-r from-alert-500 to-alert-600 text-white shadow-lg shadow-alert-500/25 scale-[1.02]' : 'text-neutral-600 hover:text-alert-700 hover:bg-white/80'
                 }`}>
-                <t.icon className={`w-3.5 h-3.5 md:w-4 md:h-4 ${isActive ? 'text-alert-100' : ''}`} />
-                <span className="hidden sm:inline whitespace-nowrap">{t.label}</span>
+                <t.icon className={`w-3.5 h-3.5 md:w-4 md:h-4 flex-shrink-0 ${isActive ? 'text-alert-100' : ''}`} />
+                <span className="whitespace-nowrap">{t.label}</span>
               </button>
             )
           })}
@@ -417,10 +417,10 @@ function App() {
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-dark-300" />
                   <input type="text" placeholder="Buscar..." value={rankSearch} onChange={e => setRankSearch(e.target.value)}
-                    className="pl-8 pr-3 py-1.5 bg-neutral-50 border border-neutral-200 rounded-lg text-xs w-36 focus:ring-2 focus:ring-alert-200 outline-none" />
+                    className="pl-8 pr-3 py-1.5 bg-neutral-50 border border-neutral-200 rounded-lg text-[16px] sm:text-xs w-36 focus:ring-2 focus:ring-alert-200 outline-none" />
                 </div>
               </div>
-              <div className="overflow-y-auto max-h-[400px]">
+              <div className="overflow-x-auto overflow-y-auto max-h-[400px]">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 bg-white">
                     <tr className="border-b border-neutral-200">
